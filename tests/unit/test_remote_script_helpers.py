@@ -71,6 +71,7 @@ class _GroupTrack:
 
 def _make_script(tracks=()):
     script = AbletonMCP.__new__(AbletonMCP)
+    script.log_message = lambda msg: None
     script._song = MagicMock()
     script._song.tracks = list(tracks)
     script._song.return_tracks = []
@@ -157,3 +158,23 @@ class TestCreateCuePointAssignsName:
         script._create_cue_point(time=16.0, name="")
 
         assert cue.name == "1.1.1"
+
+    def test_name_assignment_failure_does_not_fail_created_cue(self):
+        class ReadOnlyNameCue:
+            time = 16.0
+
+            @property
+            def name(self):
+                return "1.1.1"
+
+            @name.setter
+            def name(self, value):
+                raise AttributeError("can't set attribute")
+
+        script = _make_script()
+        cue = ReadOnlyNameCue()
+        self._wire_toggle(script, cue)
+
+        result = script._create_cue_point(time=16.0, name="Drop")
+
+        assert result == {"time": 16.0, "name": "Drop"}

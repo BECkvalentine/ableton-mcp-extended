@@ -1272,7 +1272,10 @@ class AbletonMCP(ControlSurface):
             if name:
                 for cp in tuple(self._song.cue_points):
                     if abs(cp.time - time) < 0.01:
-                        cp.name = name
+                        try:
+                            cp.name = name
+                        except Exception as e:
+                            self.log_message("Could not name cue point: " + str(e))
                         break
             return {"time": time, "name": name}
         except Exception as e:

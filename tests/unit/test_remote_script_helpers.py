@@ -97,6 +97,39 @@ class TestGetTrackInfoOnGroupTrack:
         assert result["is_group_track"] is False
 
 
+class TestCreateAudioTrack:
+    def test_create_audio_track_at_end(self):
+        existing = _NormalTrack("1-MIDI")
+        created = _NormalTrack("2-Audio", has_midi_input=False, has_audio_input=True)
+        script = _make_script([existing])
+
+        def create_audio_track(index):
+            assert index == -1
+            script._song.tracks.append(created)
+
+        script._song.create_audio_track.side_effect = create_audio_track
+
+        result = script._create_audio_track(-1)
+
+        assert result == {"index": 1, "name": "2-Audio"}
+
+    def test_create_audio_track_at_index(self):
+        first = _NormalTrack("1-MIDI")
+        second = _NormalTrack("2-MIDI")
+        created = _NormalTrack("2-Audio", has_midi_input=False, has_audio_input=True)
+        script = _make_script([first, second])
+
+        def create_audio_track(index):
+            assert index == 1
+            script._song.tracks.insert(index, created)
+
+        script._song.create_audio_track.side_effect = create_audio_track
+
+        result = script._create_audio_track(1)
+
+        assert result == {"index": 1, "name": "2-Audio"}
+
+
 class TestGetArrangementInfoSkipsGroupTracks:
     def test_all_tracks_skips_group(self):
         normal = _NormalTrack("Drums")

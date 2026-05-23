@@ -13,7 +13,41 @@ sys.modules['mcp.server.fastmcp'] = _mock_fastmcp
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from MCP_Server.server import delete_track, get_track_deletion_status
+from MCP_Server.server import create_audio_track, delete_track, get_track_deletion_status
+
+
+class TestCreateAudioTrack:
+    """Tests for the create_audio_track MCP tool."""
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_create_audio_track_at_end(self, mock_conn):
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {
+            "index": 3,
+            "name": "4-Audio",
+        }
+        mock_conn.return_value = mock_ableton
+
+        result = create_audio_track(MagicMock())
+
+        assert "Created new audio track: 4-Audio" in result
+        mock_ableton.send_command.assert_called_once_with(
+            "create_audio_track", {"index": -1})
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_create_audio_track_at_index(self, mock_conn):
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {
+            "index": 1,
+            "name": "2-Audio",
+        }
+        mock_conn.return_value = mock_ableton
+
+        result = create_audio_track(MagicMock(), index=1)
+
+        assert "Created new audio track: 2-Audio" in result
+        mock_ableton.send_command.assert_called_once_with(
+            "create_audio_track", {"index": 1})
 
 
 class TestDeleteTrackSafetyGuard:

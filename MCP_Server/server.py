@@ -15,6 +15,52 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("AbletonMCPServer")
 
+MUTATING_COMMANDS = frozenset({
+    "add_notes_to_arrangement_clip",
+    "add_notes_to_clip",
+    "control_arrangement_view",
+    "create_arrangement_audio_clip",
+    "create_arrangement_clip",
+    "create_audio_track",
+    "create_clip",
+    "create_cue_point",
+    "create_midi_track",
+    "delete_arrangement_clip",
+    "delete_cue_point",
+    "delete_device",
+    "delete_track",
+    "duplicate_to_arrangement",
+    "fire_clip",
+    "jump_to_cue",
+    "load_browser_item",
+    "load_instrument_or_effect",
+    "manage_clip_automation",
+    "navigate_preset",
+    "set_arrangement_clip_property",
+    "set_arrangement_loop",
+    "set_clip_name",
+    "set_device_enabled",
+    "set_device_parameter",
+    "set_song_time",
+    "set_tempo",
+    "set_track_name",
+    "set_track_panning",
+    "set_track_volume",
+    "set_view",
+    "start_playback",
+    "stop_clip",
+    "stop_playback",
+})
+
+COMMAND_MUTATION_DELAY_SECONDS = 0.1
+READ_COMMAND_TIMEOUT_SECONDS = 10.0
+MUTATING_COMMAND_TIMEOUT_SECONDS = 15.0
+
+
+def is_mutating_command(command_type: str) -> bool:
+    return command_type in MUTATING_COMMANDS
+
+
 @dataclass
 class AbletonConnection:
     host: str
@@ -103,24 +149,7 @@ class AbletonConnection:
             "params": params or {}
         }
         
-        # Check if this is a state-modifying command
-        is_modifying_command = command_type in [
-            "create_midi_track", "create_audio_track", "set_track_name",
-            "create_clip", "add_notes_to_clip", "set_clip_name",
-            "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
-            "start_playback", "stop_playback", "load_instrument_or_effect",
-            "set_song_time", "set_arrangement_loop", "jump_to_cue",
-            "create_cue_point", "delete_cue_point",
-            "create_arrangement_clip", "create_arrangement_audio_clip",
-            "duplicate_to_arrangement", "delete_arrangement_clip",
-            "set_arrangement_clip_property",
-            "set_view", "control_arrangement_view",
-            "manage_clip_automation",
-            "add_notes_to_arrangement_clip",
-            "set_device_parameter", "set_device_enabled",
-            "delete_device", "navigate_preset",
-            "set_track_volume", "set_track_panning",
-        ]
+        is_modifying_command = is_mutating_command(command_type)
         
         try:
             logger.info(f"Sending command: {command_type} with params: {params}")
@@ -131,11 +160,14 @@ class AbletonConnection:
             
             # For state-modifying commands, add a small delay to give Ableton time to process
             if is_modifying_command:
-                import time
-                time.sleep(0.1)  # 100ms delay
+                time.sleep(COMMAND_MUTATION_DELAY_SECONDS)
             
             # Set timeout based on command type
-            timeout = 15.0 if is_modifying_command else 10.0
+            timeout = (
+                MUTATING_COMMAND_TIMEOUT_SECONDS
+                if is_modifying_command
+                else READ_COMMAND_TIMEOUT_SECONDS
+            )
             self.sock.settimeout(timeout)
             
             # Receive the response
@@ -152,8 +184,7 @@ class AbletonConnection:
             
             # For state-modifying commands, add another small delay after receiving response
             if is_modifying_command:
-                import time
-                time.sleep(0.1)  # 100ms delay
+                time.sleep(COMMAND_MUTATION_DELAY_SECONDS)
             
             return response.get("result", {})
         except socket.timeout:

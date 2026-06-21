@@ -270,6 +270,66 @@ class TestCreateArrangementAudioClipCommand:
         assert args[0][1]["file_path"] == "/audio.wav"
 
 
+class TestCopyArrangementAudioClipToSessionCommand:
+    """Test arrangement-to-session audio clip fixture command construction."""
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_converts_indices_and_create_track_sentinel(self, mock_conn):
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {
+            "name": "CLICK",
+            "target_track_index": 48,
+            "target_clip_index": 0,
+            "created_track": True,
+        }
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import copy_arrangement_audio_clip_to_session
+        copy_arrangement_audio_clip_to_session(
+            MagicMock(),
+            source_track_index=8,
+            arrangement_clip_index=2,
+            target_track_index=0,
+            target_clip_index=1,
+            create_missing_scenes=True,
+            target_track_name="Fixture",
+            source_file_path="/tmp/click.wav",
+        )
+
+        args = mock_ableton.send_command.call_args
+        assert args[0][0] == "copy_arrangement_audio_clip_to_session"
+        assert args[0][1]["source_track_index"] == 7
+        assert args[0][1]["arrangement_clip_index"] == 1
+        assert args[0][1]["target_track_index"] == -1
+        assert args[0][1]["target_clip_index"] == 0
+        assert args[0][1]["target_track_name"] == "Fixture"
+        assert args[0][1]["source_file_path"] == "/tmp/click.wav"
+
+    @patch('MCP_Server.server.get_ableton_connection')
+    def test_converts_explicit_target_track(self, mock_conn):
+        mock_ableton = MagicMock()
+        mock_ableton.send_command.return_value = {
+            "name": "CLICK",
+            "target_track_index": 9,
+            "target_clip_index": 2,
+            "created_track": False,
+        }
+        mock_conn.return_value = mock_ableton
+
+        from MCP_Server.server import copy_arrangement_audio_clip_to_session
+        copy_arrangement_audio_clip_to_session(
+            MagicMock(),
+            source_track_index=8,
+            arrangement_clip_index=2,
+            target_track_index=10,
+            target_clip_index=3,
+        )
+
+        args = mock_ableton.send_command.call_args
+        assert args[0][1]["target_track_index"] == 9
+        assert args[0][1]["target_clip_index"] == 2
+
+
 class TestDuplicateClipToArrangementCommand:
     """Test duplicate_clip_to_arrangement command construction."""
 

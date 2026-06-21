@@ -71,10 +71,12 @@ class _GroupTrack:
 
 def _make_script(tracks=()):
     script = AbletonMCP.__new__(AbletonMCP)
+    script.log_message = lambda msg: None
     script._song = MagicMock()
     script._song.tracks = list(tracks)
     script._song.return_tracks = []
     script._song.master_track = MagicMock()
+    script._song.current_song_time = 0.0
     return script
 
 
@@ -179,6 +181,8 @@ class TestCreateCuePointAssignsName:
         script._create_cue_point(time=16.0, name="Drop")
 
         assert cue.name == "Drop"
+        assert script._song.current_song_time == 16.0
+        assert script._song.start_time == 16.0
 
     def test_blank_name_does_not_overwrite(self):
         script = _make_script()
@@ -190,3 +194,135 @@ class TestCreateCuePointAssignsName:
         script._create_cue_point(time=16.0, name="")
 
         assert cue.name == "1.1.1"
+
+    def test_name_assignment_failure_does_not_fail_created_cue(self):
+        class ReadOnlyNameCue:
+            time = 16.0
+
+            @property
+            def name(self):
+                return "1.1.1"
+
+            @name.setter
+            def name(self, value):
+                raise AttributeError("can't set attribute")
+
+        script = _make_script()
+        cue = ReadOnlyNameCue()
+        self._wire_toggle(script, cue)
+
+        result = script._create_cue_point(time=16.0, name="Drop")
+
+        assert result == {"time": 16.0, "name": "Drop"}
+
+    def test_updates_current_and_start_time_before_creating(self):
+        script = _make_script()
+        script._song.current_song_time = 716.0
+        cue = MagicMock()
+        cue.time = 16.0
+        cue.name = ""
+        self._wire_toggle(script, cue)
+
+        script._create_cue_point(time=16.0, name="")
+
+        assert script._song.current_song_time == 16.0
+        assert script._song.start_time == 16.0
+
+    def test_rolls_back_when_cue_created_at_wrong_time(self):
+        script = _make_script()
+        cue = MagicMock()
+        cue.time = 128.0
+        cue.name = "1"
+        self._wire_toggle(script, cue)
+
+        try:
+            script._create_cue_point(time=16.0, name="")
+        except ValueError as exc:
+            assert "wrong position" in str(exc)
+        else:
+            raise AssertionError("Expected wrong-position cue creation to fail")
+
+        script._song.undo.assert_called_once()
+
+    def test_snapshots_wrong_cue_time_before_rollback(self):
+        class InvalidAfterUndoCue:
+            def __init__(self, script):
+                self.script = script
+                self.name = "1"
+
+            @property
+            def time(self):
+                if self.script._undone:
+                    raise TypeError("Cue object is invalid after undo")
+                return 128.0
+
+        script = _make_script()
+        script._undone = False
+
+        def undo():
+            script._undone = True
+
+        script._song.undo.side_effect = undo
+        cue = InvalidAfterUndoCue(script)
+        self._wire_toggle(script, cue)
+
+        try:
+            script._create_cue_point(time=16.0, name="")
+        except ValueError as exc:
+            assert "128.0" in str(exc)
+        else:
+            raise AssertionError("Expected wrong-position cue creation to fail")
+
+    def test_does_not_compare_live_cue_objects_directly(self):
+        class Cue:
+            def __init__(self, time):
+                self.time = time
+                self.name = ""
+
+            def __eq__(self, other):
+                raise TypeError("Live object equality is unavailable")
+
+        script = _make_script()
+        cue = Cue(16.0)
+        self._wire_toggle(script, cue)
+
+        result = script._create_cue_point(time=16.0, name="")
+
+        assert result == {"time": 16.0, "name": ""}
+
+
+class TestDeleteCuePoint:
+    def test_deletes_cue_at_requested_time(self):
+        script = _make_script()
+        cue = MagicMock()
+        cue.time = 16.0
+        cue.name = "1"
+        script._song.cue_points = (cue,)
+
+        def toggle():
+            script._song.cue_points = ()
+
+        script._song.set_or_delete_cue.side_effect = toggle
+
+        result = script._delete_cue_point(time=16.0)
+
+        assert result == {"deleted": True}
+        assert script._song.current_song_time == 16.0
+        assert script._song.start_time == 16.0
+        script._song.undo.assert_not_called()
+
+    def test_rolls_back_when_delete_does_not_remove_requested_cue(self):
+        script = _make_script()
+        cue = MagicMock()
+        cue.time = 16.0
+        cue.name = "1"
+        script._song.cue_points = (cue,)
+
+        try:
+            script._delete_cue_point(time=16.0)
+        except ValueError as exc:
+            assert "not deleted" in str(exc)
+        else:
+            raise AssertionError("Expected failed cue deletion")
+
+        script._song.undo.assert_called_once()

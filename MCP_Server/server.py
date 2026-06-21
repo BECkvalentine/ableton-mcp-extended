@@ -1364,6 +1364,7 @@ def create_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0, name: str = 
     try:
         ableton = get_ableton_connection()
         time_val = _convert_bar_to_beat(bar, beat)
+        ableton.send_command("set_song_time", {"time": time_val})
         result = ableton.send_command("create_cue_point", {"time": time_val, "name": name})
         return f"Created cue point '{name}' at bar {bar if bar > 0 else '?'}"
     except Exception as e:
@@ -1382,6 +1383,7 @@ def delete_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0) -> str:
     try:
         ableton = get_ableton_connection()
         time_val = _convert_bar_to_beat(bar, beat)
+        ableton.send_command("set_song_time", {"time": time_val})
         ableton.send_command("delete_cue_point", {"time": time_val})
         return f"Deleted cue point at bar {bar if bar > 0 else '?'}"
     except Exception as e:

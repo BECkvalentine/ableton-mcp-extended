@@ -1016,6 +1016,38 @@ class TestArrangementReconciliationHelpers:
         assert result["gain"] == 0.4
         assert result["warp_mode_name"] == "Beats"
 
+    def test_arrangement_midi_clip_info_skips_audio_only_properties(self):
+        class MidiArrangementClip(_MidiClip):
+            @property
+            def warping(self):
+                raise RuntimeError("Warping is only available for Audio Clips")
+
+            @property
+            def warp_mode(self):
+                raise RuntimeError("Warping is only available for Audio Clips")
+
+            @property
+            def gain(self):
+                raise RuntimeError("Gain is only available for Audio Clips")
+
+        clip = MidiArrangementClip("Section")
+        clip.start_time = 8.0
+        clip.end_time = 16.0
+        clip.muted = False
+        script = _make_script()
+
+        result = script._get_arrangement_clip_info(clip)
+
+        assert result["name"] == "Section"
+        assert result["start_time"] == 8.0
+        assert result["end_time"] == 16.0
+        assert result["is_midi"] is True
+        assert result["is_audio"] is False
+        assert result["warping"] is None
+        assert result["warp_mode"] is None
+        assert result["gain"] is None
+        assert "error" not in result
+
     def test_copy_arrangement_audio_clip_to_new_session_track(self):
         source_clip = _AudioClip("CLICK")
         source_clip.start_time = 8.0

@@ -740,48 +740,56 @@ class AbletonMCP(ControlSurface):
     def _get_arrangement_clip_info(self, clip):
         """Serialize a Clip object to ArrangementClipInfo dict."""
         try:
+            def safe_get(obj, attr, default=None):
+                try:
+                    return getattr(obj, attr)
+                except Exception:
+                    return default
+
             sample_path = ""
             sample_name = ""
-            try:
-                if hasattr(clip, "sample") and clip.sample is not None:
-                    sample_path = getattr(clip.sample, "file_path", "") or ""
-                    raw_sample_name = getattr(clip.sample, "name", "") or ""
+            is_audio = bool(safe_get(clip, "is_audio_clip", False))
+            if is_audio:
+                sample = safe_get(clip, "sample", None)
+                if sample is not None:
+                    sample_path = safe_get(sample, "file_path", "") or ""
+                    raw_sample_name = safe_get(sample, "name", "") or ""
                     sample_name = (
                         raw_sample_name
                         if isinstance(raw_sample_name, str) else "")
-            except Exception as e:
-                self.log_message("Could not get arrangement clip sample path: " + str(e))
 
-            warp_mode = int(clip.warp_mode) if hasattr(clip, "warp_mode") else None
+            raw_warp_mode = safe_get(clip, "warp_mode", None) if is_audio else None
+            warp_mode = int(raw_warp_mode) if raw_warp_mode is not None else None
+            start_time = safe_get(clip, "start_time", 0.0)
+            end_time = safe_get(clip, "end_time", start_time)
             return {
-                "name": clip.name,
-                "start_time": clip.start_time,
-                "end_time": clip.end_time,
-                "length": clip.end_time - clip.start_time,
-                "is_midi": clip.is_midi_clip,
-                "is_audio": clip.is_audio_clip,
-                "muted": clip.muted,
-                "color": clip.color,
-                "looping": clip.looping,
-                "loop_start": clip.loop_start,
-                "loop_end": clip.loop_end,
-                "start_marker": clip.start_marker,
-                "end_marker": clip.end_marker,
+                "name": safe_get(clip, "name", ""),
+                "start_time": start_time,
+                "end_time": end_time,
+                "length": end_time - start_time,
+                "is_midi": bool(safe_get(clip, "is_midi_clip", False)),
+                "is_audio": is_audio,
+                "muted": safe_get(clip, "muted", False),
+                "color": safe_get(clip, "color", 0),
+                "looping": safe_get(clip, "looping", False),
+                "loop_start": safe_get(clip, "loop_start", 0.0),
+                "loop_end": safe_get(clip, "loop_end", 0.0),
+                "start_marker": safe_get(clip, "start_marker", 0.0),
+                "end_marker": safe_get(clip, "end_marker", 0.0),
                 "sample_path": sample_path,
                 "sample_name": sample_name,
-                "gain": clip.gain if hasattr(clip, "gain") else None,
+                "gain": safe_get(clip, "gain", None) if is_audio else None,
                 "gain_display_string": (
-                    clip.gain_display_string
-                    if hasattr(clip, "gain_display_string") else ""),
-                "warping": clip.warping if hasattr(clip, "warping") else None,
+                    safe_get(clip, "gain_display_string", "") if is_audio else ""),
+                "warping": safe_get(clip, "warping", None) if is_audio else None,
                 "warp_mode": warp_mode,
                 "warp_mode_name": (
                     self.WARP_MODES.get(warp_mode, "Unknown")
                     if warp_mode is not None else ""),
                 "pitch_coarse": (
-                    clip.pitch_coarse if hasattr(clip, "pitch_coarse") else None),
+                    safe_get(clip, "pitch_coarse", None) if is_audio else None),
                 "pitch_fine": (
-                    clip.pitch_fine if hasattr(clip, "pitch_fine") else None),
+                    safe_get(clip, "pitch_fine", None) if is_audio else None),
             }
         except Exception as e:
             self.log_message("Error getting arrangement clip info: " + str(e))

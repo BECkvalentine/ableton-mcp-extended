@@ -225,9 +225,16 @@ class AbletonMCP(ControlSurface):
             elif command_type == "get_track_info":
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_info(track_index)
+            elif command_type == "get_scenes":
+                response["result"] = self._get_scenes()
+            elif command_type == "get_return_tracks":
+                response["result"] = self._get_return_tracks()
             # Commands that modify Live's state should be scheduled on the main thread
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "add_notes_to_clip", "set_clip_name",
+                                 "create_scene", "delete_scene", "duplicate_scene",
+                                 "fire_scene", "set_scene_name", "set_scene_color",
+                                 "set_scene_tempo", "stop_all_clips",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item",
                                  "set_song_time", "set_arrangement_loop", "jump_to_cue",
@@ -241,7 +248,15 @@ class AbletonMCP(ControlSurface):
                                  "set_device_parameter", "set_device_enabled",
                                  "delete_device", "navigate_preset",
                                  "delete_track",
-                                 "set_track_volume", "set_track_panning"]:
+                                 "set_track_volume", "set_track_panning",
+                                 "set_track_mute", "set_track_solo", "set_track_arm",
+                                 "set_track_color", "create_return_track",
+                                 "delete_return_track",
+                                 "set_return_track_name", "set_return_track_volume",
+                                 "set_return_track_panning", "set_return_track_mute",
+                                 "set_return_track_color", "set_master_volume",
+                                 "set_master_panning", "set_send",
+                                 "load_device_on_return"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -271,6 +286,33 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             name = params.get("name", "")
                             result = self._set_clip_name(track_index, clip_index, name)
+                        elif command_type == "set_scene_name":
+                            scene_index = params.get("scene_index", 0)
+                            name = params.get("name", "")
+                            create_missing = params.get("create_missing", False)
+                            result = self._set_scene_name(scene_index, name, create_missing)
+                        elif command_type == "create_scene":
+                            index = params.get("index", -1)
+                            result = self._create_scene(index)
+                        elif command_type == "delete_scene":
+                            scene_index = params.get("scene_index", 0)
+                            result = self._delete_scene(scene_index)
+                        elif command_type == "duplicate_scene":
+                            scene_index = params.get("scene_index", 0)
+                            result = self._duplicate_scene(scene_index)
+                        elif command_type == "fire_scene":
+                            scene_index = params.get("scene_index", 0)
+                            result = self._fire_scene(scene_index)
+                        elif command_type == "set_scene_color":
+                            scene_index = params.get("scene_index", 0)
+                            color = params.get("color", 0)
+                            result = self._set_scene_color(scene_index, color)
+                        elif command_type == "set_scene_tempo":
+                            scene_index = params.get("scene_index", 0)
+                            tempo = params.get("tempo", 0.0)
+                            result = self._set_scene_tempo(scene_index, tempo)
+                        elif command_type == "stop_all_clips":
+                            result = self._stop_all_clips()
                         elif command_type == "set_tempo":
                             tempo = params.get("tempo", 120.0)
                             result = self._set_tempo(tempo)
@@ -387,6 +429,62 @@ class AbletonMCP(ControlSurface):
                             ti = params.get("track_index", 0)
                             panning = params.get("panning", 0.0)
                             result = self._set_track_panning(ti, panning)
+                        elif command_type == "set_track_mute":
+                            ti = params.get("track_index", 0)
+                            mute = params.get("mute", True)
+                            result = self._set_track_mute(ti, mute)
+                        elif command_type == "set_track_solo":
+                            ti = params.get("track_index", 0)
+                            solo = params.get("solo", True)
+                            result = self._set_track_solo(ti, solo)
+                        elif command_type == "set_track_arm":
+                            ti = params.get("track_index", 0)
+                            arm = params.get("arm", True)
+                            result = self._set_track_arm(ti, arm)
+                        elif command_type == "set_track_color":
+                            ti = params.get("track_index", 0)
+                            color = params.get("color", 0)
+                            result = self._set_track_color(ti, color)
+                        elif command_type == "create_return_track":
+                            result = self._create_return_track()
+                        elif command_type == "delete_return_track":
+                            rti = params.get("return_track_index", 0)
+                            result = self._delete_return_track(rti)
+                        elif command_type == "set_return_track_name":
+                            rti = params.get("return_track_index", 0)
+                            name = params.get("name", "")
+                            result = self._set_return_track_name(rti, name)
+                        elif command_type == "set_return_track_volume":
+                            rti = params.get("return_track_index", 0)
+                            volume = params.get("volume", 0.85)
+                            result = self._set_return_track_volume(rti, volume)
+                        elif command_type == "set_return_track_panning":
+                            rti = params.get("return_track_index", 0)
+                            panning = params.get("panning", 0.0)
+                            result = self._set_return_track_panning(rti, panning)
+                        elif command_type == "set_return_track_mute":
+                            rti = params.get("return_track_index", 0)
+                            mute = params.get("mute", True)
+                            result = self._set_return_track_mute(rti, mute)
+                        elif command_type == "set_return_track_color":
+                            rti = params.get("return_track_index", 0)
+                            color = params.get("color", 0)
+                            result = self._set_return_track_color(rti, color)
+                        elif command_type == "set_master_volume":
+                            volume = params.get("volume", 0.85)
+                            result = self._set_master_volume(volume)
+                        elif command_type == "set_master_panning":
+                            panning = params.get("panning", 0.0)
+                            result = self._set_master_panning(panning)
+                        elif command_type == "set_send":
+                            sti = params.get("source_track_index", 0)
+                            rti = params.get("return_track_index", 0)
+                            send_amount = params.get("send_amount", 0.0)
+                            result = self._set_send(sti, rti, send_amount)
+                        elif command_type == "load_device_on_return":
+                            rti = params.get("return_track_index", 0)
+                            item_uri = params.get("item_uri", "")
+                            result = self._load_device_on_return(rti, item_uri)
                         elif command_type == "navigate_preset":
                             ti = params.get("track_index", 0)
                             di = params.get("device_index", 0)
@@ -564,6 +662,14 @@ class AbletonMCP(ControlSurface):
                 "signature_numerator": self._song.signature_numerator,
                 "signature_denominator": self._song.signature_denominator,
                 "track_count": len(self._song.tracks),
+                "scene_count": len(self._song.scenes),
+                "scenes": [
+                    {
+                        "index": index,
+                        "name": scene.name
+                    }
+                    for index, scene in enumerate(self._song.scenes)
+                ],
                 "return_track_count": len(self._song.return_tracks),
                 "master_track": {
                     "name": "Master",
@@ -744,6 +850,230 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error setting track panning: " + str(e))
             raise
 
+    def _resolve_session_track(self, track_index):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        return self._song.tracks[track_index]
+
+    def _resolve_return_track(self, return_track_index):
+        if return_track_index < 0 or return_track_index >= len(self._song.return_tracks):
+            raise IndexError("Return track index out of range")
+        return self._song.return_tracks[return_track_index]
+
+    def _set_track_mute(self, track_index, mute):
+        """Mute or unmute a session track."""
+        try:
+            track = self._resolve_session_track(track_index)
+            track.mute = bool(mute)
+            return {"track_name": track.name, "mute": track.mute}
+        except Exception as e:
+            self.log_message("Error setting track mute: " + str(e))
+            raise
+
+    def _set_track_solo(self, track_index, solo):
+        """Solo or unsolo a session track."""
+        try:
+            track = self._resolve_session_track(track_index)
+            track.solo = bool(solo)
+            return {"track_name": track.name, "solo": track.solo}
+        except Exception as e:
+            self.log_message("Error setting track solo: " + str(e))
+            raise
+
+    def _set_track_arm(self, track_index, arm):
+        """Arm or disarm a session track for recording."""
+        try:
+            track = self._resolve_session_track(track_index)
+            if not getattr(track, "can_be_armed", True):
+                raise ValueError("Track cannot be armed")
+            track.arm = bool(arm)
+            return {"track_name": track.name, "arm": track.arm}
+        except Exception as e:
+            self.log_message("Error setting track arm: " + str(e))
+            raise
+
+    def _set_track_color(self, track_index, color):
+        """Set a session track color."""
+        try:
+            track = self._resolve_session_track(track_index)
+            track.color = int(color)
+            return {"track_name": track.name, "color": track.color}
+        except Exception as e:
+            self.log_message("Error setting track color: " + str(e))
+            raise
+
+    def _get_return_tracks(self):
+        """Get information about all return tracks."""
+        try:
+            return_tracks = []
+            for index, track in enumerate(self._song.return_tracks):
+                devices = []
+                for device_index, device in enumerate(track.devices):
+                    devices.append({
+                        "index": device_index,
+                        "name": device.name,
+                        "class_name": device.class_name,
+                        "type": self._get_device_type(device)
+                    })
+                return_tracks.append({
+                    "index": index,
+                    "name": track.name,
+                    "mute": track.mute,
+                    "color": getattr(track, "color", 0),
+                    "volume": track.mixer_device.volume.value,
+                    "panning": track.mixer_device.panning.value,
+                    "devices": devices
+                })
+            return {
+                "return_track_count": len(return_tracks),
+                "return_tracks": return_tracks
+            }
+        except Exception as e:
+            self.log_message("Error getting return tracks: " + str(e))
+            raise
+
+    def _create_return_track(self):
+        """Create a new return track."""
+        try:
+            self._song.create_return_track()
+            new_track_index = len(self._song.return_tracks) - 1
+            new_track = self._song.return_tracks[new_track_index]
+            return {"index": new_track_index, "name": new_track.name}
+        except Exception as e:
+            self.log_message("Error creating return track: " + str(e))
+            raise
+
+    def _delete_return_track(self, return_track_index):
+        """Delete a return track."""
+        try:
+            track = self._resolve_return_track(return_track_index)
+            track_name = track.name
+            self._song.delete_return_track(return_track_index)
+            return {
+                "deleted_return_track": track_name,
+                "remaining_return_tracks": len(self._song.return_tracks),
+            }
+        except Exception as e:
+            self.log_message("Error deleting return track: " + str(e))
+            raise
+
+    def _set_return_track_name(self, return_track_index, name):
+        """Set the name of a return track."""
+        try:
+            track = self._resolve_return_track(return_track_index)
+            if len(name) > 2 and name[1] == '-' and name[0].isupper():
+                name = name[2:]
+            track.name = name
+            return {"name": track.name}
+        except Exception as e:
+            self.log_message("Error setting return track name: " + str(e))
+            raise
+
+    def _set_return_track_volume(self, return_track_index, volume):
+        """Set a return track volume."""
+        try:
+            track = self._resolve_return_track(return_track_index)
+            vol_param = track.mixer_device.volume
+            clamped = max(vol_param.min, min(vol_param.max, float(volume)))
+            vol_param.value = clamped
+            return {"track_name": track.name, "volume": vol_param.value}
+        except Exception as e:
+            self.log_message("Error setting return track volume: " + str(e))
+            raise
+
+    def _set_return_track_panning(self, return_track_index, panning):
+        """Set a return track panning value."""
+        try:
+            track = self._resolve_return_track(return_track_index)
+            pan_param = track.mixer_device.panning
+            clamped = max(pan_param.min, min(pan_param.max, float(panning)))
+            pan_param.value = clamped
+            return {"track_name": track.name, "panning": pan_param.value}
+        except Exception as e:
+            self.log_message("Error setting return track panning: " + str(e))
+            raise
+
+    def _set_return_track_mute(self, return_track_index, mute):
+        """Mute or unmute a return track."""
+        try:
+            track = self._resolve_return_track(return_track_index)
+            track.mute = bool(mute)
+            return {"track_name": track.name, "mute": track.mute}
+        except Exception as e:
+            self.log_message("Error setting return track mute: " + str(e))
+            raise
+
+    def _set_return_track_color(self, return_track_index, color):
+        """Set a return track color."""
+        try:
+            track = self._resolve_return_track(return_track_index)
+            track.color = int(color)
+            return {"track_name": track.name, "color": track.color}
+        except Exception as e:
+            self.log_message("Error setting return track color: " + str(e))
+            raise
+
+    def _set_master_volume(self, volume):
+        """Set the master track volume."""
+        try:
+            vol_param = self._song.master_track.mixer_device.volume
+            clamped = max(vol_param.min, min(vol_param.max, float(volume)))
+            vol_param.value = clamped
+            return {"volume": vol_param.value}
+        except Exception as e:
+            self.log_message("Error setting master volume: " + str(e))
+            raise
+
+    def _set_master_panning(self, panning):
+        """Set the master track panning."""
+        try:
+            pan_param = self._song.master_track.mixer_device.panning
+            clamped = max(pan_param.min, min(pan_param.max, float(panning)))
+            pan_param.value = clamped
+            return {"panning": pan_param.value}
+        except Exception as e:
+            self.log_message("Error setting master panning: " + str(e))
+            raise
+
+    def _set_send(self, source_track_index, return_track_index, send_amount):
+        """Set the send amount from a source track to a return track."""
+        try:
+            source_track = self._resolve_session_track(source_track_index)
+            self._resolve_return_track(return_track_index)
+            if return_track_index >= len(source_track.mixer_device.sends):
+                raise IndexError("Send index out of range")
+            send_param = source_track.mixer_device.sends[return_track_index]
+            send_param.value = max(0.0, min(1.0, float(send_amount)))
+            return {
+                "source_track_name": source_track.name,
+                "return_track_index": return_track_index,
+                "send_amount": send_param.value
+            }
+        except Exception as e:
+            self.log_message("Error setting send: " + str(e))
+            raise
+
+    def _load_device_on_return(self, return_track_index, item_uri):
+        """Load an instrument or effect onto a return track by URI."""
+        try:
+            return_track = self._resolve_return_track(return_track_index)
+            app = self.application()
+            item = self._find_browser_item_by_uri(app.browser, item_uri)
+            if not item:
+                raise ValueError("Browser item with URI '{0}' not found".format(item_uri))
+            self._song.view.selected_track = return_track
+            app.browser.load_item(item)
+            return {
+                "loaded": True,
+                "device_name": item.name,
+                "return_track_name": return_track.name,
+                "return_track_index": return_track_index,
+                "uri": item_uri
+            }
+        except Exception as e:
+            self.log_message("Error loading device on return track: " + str(e))
+            raise
+
     def _create_clip(self, track_index, clip_index, length):
         """Create a new MIDI clip in the specified track and clip slot"""
         try:
@@ -838,6 +1168,124 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error setting clip name: " + str(e))
+            raise
+
+    def _resolve_scene(self, scene_index):
+        if scene_index < 0 or scene_index >= len(self._song.scenes):
+            raise IndexError("Scene index out of range")
+        return self._song.scenes[scene_index]
+
+    def _scene_info(self, scene, scene_index):
+        return {
+            "index": scene_index,
+            "name": scene.name,
+            "color": getattr(scene, "color", 0),
+            "tempo": getattr(scene, "tempo", 0.0),
+        }
+
+    def _get_scenes(self):
+        """Get all Session View scenes."""
+        try:
+            scenes = [
+                self._scene_info(scene, index)
+                for index, scene in enumerate(self._song.scenes)
+            ]
+            return {"scene_count": len(scenes), "scenes": scenes}
+        except Exception as e:
+            self.log_message("Error getting scenes: " + str(e))
+            raise
+
+    def _create_scene(self, index=-1):
+        """Create a Session View scene."""
+        try:
+            self._song.create_scene(index)
+            actual_index = index if index >= 0 else len(self._song.scenes) - 1
+            scene = self._resolve_scene(actual_index)
+            return self._scene_info(scene, actual_index)
+        except Exception as e:
+            self.log_message("Error creating scene: " + str(e))
+            raise
+
+    def _delete_scene(self, scene_index):
+        """Delete a Session View scene."""
+        try:
+            scene = self._resolve_scene(scene_index)
+            name = scene.name
+            self._song.delete_scene(scene_index)
+            return {"deleted_index": scene_index, "name": name}
+        except Exception as e:
+            self.log_message("Error deleting scene: " + str(e))
+            raise
+
+    def _duplicate_scene(self, scene_index):
+        """Duplicate a Session View scene."""
+        try:
+            self._resolve_scene(scene_index)
+            self._song.duplicate_scene(scene_index)
+            new_index = scene_index + 1
+            scene = self._resolve_scene(new_index)
+            return {
+                "source_index": scene_index,
+                "new_index": new_index,
+                "name": scene.name,
+            }
+        except Exception as e:
+            self.log_message("Error duplicating scene: " + str(e))
+            raise
+
+    def _fire_scene(self, scene_index):
+        """Fire a Session View scene."""
+        try:
+            scene = self._resolve_scene(scene_index)
+            scene.fire()
+            return {"index": scene_index, "name": scene.name}
+        except Exception as e:
+            self.log_message("Error firing scene: " + str(e))
+            raise
+
+    def _set_scene_name(self, scene_index, name, create_missing=False):
+        """Set the name of a Session View scene."""
+        try:
+            if scene_index < 0:
+                raise IndexError("Scene index out of range")
+
+            while create_missing and scene_index >= len(self._song.scenes):
+                self._song.create_scene(len(self._song.scenes))
+
+            scene = self._resolve_scene(scene_index)
+            scene.name = name
+            return self._scene_info(scene, scene_index)
+        except Exception as e:
+            self.log_message("Error setting scene name: " + str(e))
+            raise
+
+    def _set_scene_color(self, scene_index, color):
+        """Set a Session View scene color."""
+        try:
+            scene = self._resolve_scene(scene_index)
+            scene.color = int(color)
+            return self._scene_info(scene, scene_index)
+        except Exception as e:
+            self.log_message("Error setting scene color: " + str(e))
+            raise
+
+    def _set_scene_tempo(self, scene_index, tempo):
+        """Set a Session View scene tempo override."""
+        try:
+            scene = self._resolve_scene(scene_index)
+            scene.tempo = float(tempo)
+            return self._scene_info(scene, scene_index)
+        except Exception as e:
+            self.log_message("Error setting scene tempo: " + str(e))
+            raise
+
+    def _stop_all_clips(self):
+        """Stop all currently playing Session View clips."""
+        try:
+            self._song.stop_all_clips()
+            return {"stopped": True}
+        except Exception as e:
+            self.log_message("Error stopping all clips: " + str(e))
             raise
     
     def _set_tempo(self, tempo):
@@ -1807,18 +2255,19 @@ class AbletonMCP(ControlSurface):
         """Resolve a device reference to (track, device) tuple.
 
         Parameters:
-        - track_index: 0-based track index
+        - track_index: 0-based track index, with return tracks after session tracks
         - device_index: 0-based device index on track (or within chain)
         - chain_index: optional 0-based chain index for rack devices
 
         Returns (track, device) tuple.
         Raises IndexError or ValueError on invalid references.
         """
-        if track_index < 0 or track_index >= len(self._song.tracks):
+        all_tracks = list(self._song.tracks) + list(self._song.return_tracks)
+        if track_index < 0 or track_index >= len(all_tracks):
             raise IndexError("Track index {0} out of range (0-{1})".format(
-                track_index, len(self._song.tracks) - 1))
+                track_index, len(all_tracks) - 1))
 
-        track = self._song.tracks[track_index]
+        track = all_tracks[track_index]
 
         if device_index < 0 or device_index >= len(track.devices):
             raise IndexError("Device index {0} out of range on track '{1}' (0-{2})".format(

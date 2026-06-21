@@ -25,30 +25,53 @@ MUTATING_COMMANDS = frozenset({
     "create_clip",
     "create_cue_point",
     "create_midi_track",
+    "create_return_track",
+    "create_scene",
     "delete_arrangement_clip",
     "delete_cue_point",
     "delete_device",
+    "delete_return_track",
+    "delete_scene",
     "delete_track",
     "duplicate_to_arrangement",
+    "duplicate_scene",
     "fire_clip",
+    "fire_scene",
     "jump_to_cue",
     "load_browser_item",
+    "load_device_on_return",
     "load_instrument_or_effect",
     "manage_clip_automation",
     "navigate_preset",
     "set_arrangement_clip_property",
     "set_arrangement_loop",
     "set_clip_name",
+    "set_master_panning",
+    "set_master_volume",
+    "set_return_track_color",
+    "set_return_track_mute",
+    "set_return_track_name",
+    "set_return_track_panning",
+    "set_return_track_volume",
+    "set_scene_color",
+    "set_scene_name",
+    "set_scene_tempo",
     "set_device_enabled",
     "set_device_parameter",
+    "set_send",
     "set_song_time",
     "set_tempo",
+    "set_track_arm",
+    "set_track_color",
+    "set_track_mute",
     "set_track_name",
     "set_track_panning",
+    "set_track_solo",
     "set_track_volume",
     "set_view",
     "start_playback",
     "stop_clip",
+    "stop_all_clips",
     "stop_playback",
 })
 
@@ -574,6 +597,340 @@ def set_track_panning(ctx: Context, track_index: int, panning: float) -> str:
 
 
 @mcp.tool()
+def set_track_mute(ctx: Context, track_index: int, mute: bool) -> str:
+    """
+    Mute or unmute a session track.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - mute: True to mute, False to unmute.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("set_track_mute", {
+            "track_index": ti,
+            "mute": mute,
+        })
+        state = "muted" if result.get("mute") else "unmuted"
+        return f"Track '{result.get('track_name', '?')}' {state}"
+    except Exception as e:
+        logger.error(f"Error setting track mute: {str(e)}")
+        return f"Error setting track mute: {str(e)}"
+
+
+@mcp.tool()
+def set_track_solo(ctx: Context, track_index: int, solo: bool) -> str:
+    """
+    Solo or unsolo a session track.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - solo: True to solo, False to unsolo.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("set_track_solo", {
+            "track_index": ti,
+            "solo": solo,
+        })
+        state = "soloed" if result.get("solo") else "unsoloed"
+        return f"Track '{result.get('track_name', '?')}' {state}"
+    except Exception as e:
+        logger.error(f"Error setting track solo: {str(e)}")
+        return f"Error setting track solo: {str(e)}"
+
+
+@mcp.tool()
+def set_track_arm(ctx: Context, track_index: int, arm: bool) -> str:
+    """
+    Arm or disarm a session track for recording.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - arm: True to arm, False to disarm.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("set_track_arm", {
+            "track_index": ti,
+            "arm": arm,
+        })
+        state = "armed" if result.get("arm") else "disarmed"
+        return f"Track '{result.get('track_name', '?')}' {state}"
+    except Exception as e:
+        logger.error(f"Error setting track arm: {str(e)}")
+        return f"Error setting track arm: {str(e)}"
+
+
+@mcp.tool()
+def set_track_color(ctx: Context, track_index: int, color: int) -> str:
+    """
+    Set a session track color.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - color: RGB color as an integer, for example 0xFF0000 for red.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("set_track_color", {
+            "track_index": ti,
+            "color": color,
+        })
+        return f"Set track '{result.get('track_name', '?')}' color to {hex(result.get('color', color))}"
+    except Exception as e:
+        logger.error(f"Error setting track color: {str(e)}")
+        return f"Error setting track color: {str(e)}"
+
+
+@mcp.tool()
+def get_return_tracks(ctx: Context) -> str:
+    """Get information about all return tracks in the Ableton session."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_return_tracks", {})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting return tracks: {str(e)}")
+        return f"Error getting return tracks: {str(e)}"
+
+
+@mcp.tool()
+def create_return_track(ctx: Context) -> str:
+    """Create a new return track in the Ableton session."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_return_track", {})
+        position = result.get("index", 0) + 1
+        return f"Created return track '{result.get('name', 'unknown')}' at position {position}"
+    except Exception as e:
+        logger.error(f"Error creating return track: {str(e)}")
+        return f"Error creating return track: {str(e)}"
+
+
+@mcp.tool()
+def delete_return_track(ctx: Context, return_track_index: int) -> str:
+    """
+    Delete a return track from the Ableton session.
+
+    Parameters:
+    - return_track_index: Return track number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        rti = _to_zero_based(return_track_index, "return_track_index")
+        result = ableton.send_command("delete_return_track", {
+            "return_track_index": rti,
+        })
+        return f"Deleted return track '{result.get('deleted_return_track', 'return track')}'"
+    except Exception as e:
+        logger.error(f"Error deleting return track: {str(e)}")
+        return f"Error deleting return track: {str(e)}"
+
+
+@mcp.tool()
+def set_return_track_name(ctx: Context, return_track_index: int, name: str) -> str:
+    """
+    Set the name of a return track.
+
+    Parameters:
+    - return_track_index: Return track number (1-based).
+    - name: The new name for the return track.
+    """
+    try:
+        ableton = get_ableton_connection()
+        rti = _to_zero_based(return_track_index, "return_track_index")
+        result = ableton.send_command("set_return_track_name", {
+            "return_track_index": rti,
+            "name": name,
+        })
+        return f"Renamed return track {return_track_index} to '{result.get('name', name)}'"
+    except Exception as e:
+        logger.error(f"Error setting return track name: {str(e)}")
+        return f"Error setting return track name: {str(e)}"
+
+
+@mcp.tool()
+def set_return_track_volume(ctx: Context, return_track_index: int, volume: float) -> str:
+    """
+    Set a return track volume.
+
+    Parameters:
+    - return_track_index: Return track number (1-based).
+    - volume: Normalized volume from 0.0 to 1.0.
+    """
+    try:
+        ableton = get_ableton_connection()
+        rti = _to_zero_based(return_track_index, "return_track_index")
+        result = ableton.send_command("set_return_track_volume", {
+            "return_track_index": rti,
+            "volume": volume,
+        })
+        return f"Set return track '{result.get('track_name', '?')}' volume to {result.get('volume', volume):.4f}"
+    except Exception as e:
+        logger.error(f"Error setting return track volume: {str(e)}")
+        return f"Error setting return track volume: {str(e)}"
+
+
+@mcp.tool()
+def set_return_track_panning(ctx: Context, return_track_index: int, panning: float) -> str:
+    """
+    Set a return track panning value.
+
+    Parameters:
+    - return_track_index: Return track number (1-based).
+    - panning: -1.0 = full left, 0.0 = center, +1.0 = full right.
+    """
+    try:
+        ableton = get_ableton_connection()
+        rti = _to_zero_based(return_track_index, "return_track_index")
+        result = ableton.send_command("set_return_track_panning", {
+            "return_track_index": rti,
+            "panning": panning,
+        })
+        return f"Set return track '{result.get('track_name', '?')}' panning to {result.get('panning', panning):.4f}"
+    except Exception as e:
+        logger.error(f"Error setting return track panning: {str(e)}")
+        return f"Error setting return track panning: {str(e)}"
+
+
+@mcp.tool()
+def set_return_track_mute(ctx: Context, return_track_index: int, mute: bool) -> str:
+    """
+    Mute or unmute a return track.
+
+    Parameters:
+    - return_track_index: Return track number (1-based).
+    - mute: True to mute, False to unmute.
+    """
+    try:
+        ableton = get_ableton_connection()
+        rti = _to_zero_based(return_track_index, "return_track_index")
+        result = ableton.send_command("set_return_track_mute", {
+            "return_track_index": rti,
+            "mute": mute,
+        })
+        state = "muted" if result.get("mute") else "unmuted"
+        return f"Return track '{result.get('track_name', '?')}' {state}"
+    except Exception as e:
+        logger.error(f"Error setting return track mute: {str(e)}")
+        return f"Error setting return track mute: {str(e)}"
+
+
+@mcp.tool()
+def set_return_track_color(ctx: Context, return_track_index: int, color: int) -> str:
+    """
+    Set a return track color.
+
+    Parameters:
+    - return_track_index: Return track number (1-based).
+    - color: RGB color as an integer, for example 0xFF0000 for red.
+    """
+    try:
+        ableton = get_ableton_connection()
+        rti = _to_zero_based(return_track_index, "return_track_index")
+        result = ableton.send_command("set_return_track_color", {
+            "return_track_index": rti,
+            "color": color,
+        })
+        return f"Set return track '{result.get('track_name', '?')}' color to {hex(result.get('color', color))}"
+    except Exception as e:
+        logger.error(f"Error setting return track color: {str(e)}")
+        return f"Error setting return track color: {str(e)}"
+
+
+@mcp.tool()
+def set_master_volume(ctx: Context, volume: float) -> str:
+    """
+    Set the master track volume.
+
+    Parameters:
+    - volume: Normalized volume from 0.0 to 1.0.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_master_volume", {"volume": volume})
+        return f"Set master volume to {result.get('volume', volume):.4f}"
+    except Exception as e:
+        logger.error(f"Error setting master volume: {str(e)}")
+        return f"Error setting master volume: {str(e)}"
+
+
+@mcp.tool()
+def set_master_panning(ctx: Context, panning: float) -> str:
+    """
+    Set the master track panning.
+
+    Parameters:
+    - panning: -1.0 = full left, 0.0 = center, +1.0 = full right.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_master_panning", {"panning": panning})
+        return f"Set master panning to {result.get('panning', panning):.4f}"
+    except Exception as e:
+        logger.error(f"Error setting master panning: {str(e)}")
+        return f"Error setting master panning: {str(e)}"
+
+
+@mcp.tool()
+def set_send(ctx: Context, source_track_index: int, return_track_index: int, send_amount: float) -> str:
+    """
+    Set the send amount from a source track to a return track.
+
+    Parameters:
+    - source_track_index: Source track number (1-based).
+    - return_track_index: Return track number (1-based).
+    - send_amount: Send level from 0.0 to 1.0.
+    """
+    try:
+        ableton = get_ableton_connection()
+        sti = _to_zero_based(source_track_index, "source_track_index")
+        rti = _to_zero_based(return_track_index, "return_track_index")
+        result = ableton.send_command("set_send", {
+            "source_track_index": sti,
+            "return_track_index": rti,
+            "send_amount": send_amount,
+        })
+        return (
+            f"Set send from '{result.get('source_track_name', '?')}' "
+            f"to return {return_track_index} at {result.get('send_amount', send_amount):.4f}"
+        )
+    except Exception as e:
+        logger.error(f"Error setting send: {str(e)}")
+        return f"Error setting send: {str(e)}"
+
+
+@mcp.tool()
+def load_device_on_return(ctx: Context, return_track_index: int, uri: str) -> str:
+    """
+    Load an instrument or effect onto a return track using its URI.
+
+    Parameters:
+    - return_track_index: Return track number (1-based).
+    - uri: The URI of the device to load.
+    """
+    try:
+        ableton = get_ableton_connection()
+        rti = _to_zero_based(return_track_index, "return_track_index")
+        result = ableton.send_command("load_device_on_return", {
+            "return_track_index": rti,
+            "item_uri": uri,
+        })
+        return (
+            f"Loaded '{result.get('device_name')}' onto return track "
+            f"'{result.get('return_track_name')}'"
+        )
+    except Exception as e:
+        logger.error(f"Error loading device on return track: {str(e)}")
+        return f"Error loading device on return track: {str(e)}"
+
+
+@mcp.tool()
 def create_clip(ctx: Context, track_index: int, clip_index: int, length: float = 4.0) -> str:
     """
     Create a new MIDI clip in the specified track and clip slot.
@@ -649,6 +1006,184 @@ def set_clip_name(ctx: Context, track_index: int, clip_index: int, name: str) ->
     except Exception as e:
         logger.error(f"Error setting clip name: {str(e)}")
         return f"Error setting clip name: {str(e)}"
+
+
+@mcp.tool()
+def get_scenes(ctx: Context) -> str:
+    """List Session View scenes."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_scenes", {})
+        scenes = result.get("scenes", [])
+        lines = [f"Scenes ({result.get('scene_count', 0)} total):"]
+        for scene in scenes:
+            index = scene.get("index", 0) + 1
+            name = scene.get("name") or "(unnamed)"
+            color = scene.get("color", 0)
+            tempo = scene.get("tempo", 0.0)
+            tempo_text = f", tempo={tempo:.1f} BPM" if tempo else ""
+            lines.append(f"  {index}. {name} color={hex(color)}{tempo_text}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error getting scenes: {str(e)}")
+        return f"Error getting scenes: {str(e)}"
+
+
+@mcp.tool()
+def create_scene(ctx: Context, position: int = 0) -> str:
+    """
+    Create a new empty Session View scene.
+
+    Parameters:
+    - position: Insert position (1-based). Use 0 to append at the end.
+    """
+    try:
+        ableton = get_ableton_connection()
+        index = -1 if position == 0 else _to_zero_based(position, "position")
+        result = ableton.send_command("create_scene", {"index": index})
+        created_position = result.get("index", 0) + 1
+        return f"Created scene '{result.get('name', '')}' at position {created_position}"
+    except Exception as e:
+        logger.error(f"Error creating scene: {str(e)}")
+        return f"Error creating scene: {str(e)}"
+
+
+@mcp.tool()
+def delete_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Delete a Session View scene.
+
+    Parameters:
+    - scene_index: Scene number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        si = _to_zero_based(scene_index, "scene_index")
+        result = ableton.send_command("delete_scene", {"scene_index": si})
+        return f"Deleted scene '{result.get('name', '')}' at position {scene_index}"
+    except Exception as e:
+        logger.error(f"Error deleting scene: {str(e)}")
+        return f"Error deleting scene: {str(e)}"
+
+
+@mcp.tool()
+def duplicate_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Duplicate a Session View scene immediately after itself.
+
+    Parameters:
+    - scene_index: Scene number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        si = _to_zero_based(scene_index, "scene_index")
+        result = ableton.send_command("duplicate_scene", {"scene_index": si})
+        new_position = result.get("new_index", 0) + 1
+        return f"Duplicated scene {scene_index} to position {new_position}: '{result.get('name', '')}'"
+    except Exception as e:
+        logger.error(f"Error duplicating scene: {str(e)}")
+        return f"Error duplicating scene: {str(e)}"
+
+
+@mcp.tool()
+def fire_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Launch all clips in a Session View scene.
+
+    Parameters:
+    - scene_index: Scene number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        si = _to_zero_based(scene_index, "scene_index")
+        result = ableton.send_command("fire_scene", {"scene_index": si})
+        return f"Fired scene {scene_index}: '{result.get('name', '')}'"
+    except Exception as e:
+        logger.error(f"Error firing scene: {str(e)}")
+        return f"Error firing scene: {str(e)}"
+
+
+@mcp.tool()
+def set_scene_name(ctx: Context, scene_index: int, name: str, create_missing: bool = False) -> str:
+    """
+    Set the name of a Session View scene.
+
+    Parameters:
+    - scene_index: Scene number (1-based).
+    - name: The new scene name.
+    - create_missing: Create scenes until scene_index exists.
+    """
+    try:
+        ableton = get_ableton_connection()
+        si = _to_zero_based(scene_index, "scene_index")
+        result = ableton.send_command("set_scene_name", {
+            "scene_index": si,
+            "name": name,
+            "create_missing": create_missing,
+        })
+        return f"Renamed scene {scene_index} to '{result.get('name', name)}'"
+    except Exception as e:
+        logger.error(f"Error setting scene name: {str(e)}")
+        return f"Error setting scene name: {str(e)}"
+
+
+@mcp.tool()
+def set_scene_color(ctx: Context, scene_index: int, color: int) -> str:
+    """
+    Set a Session View scene color.
+
+    Parameters:
+    - scene_index: Scene number (1-based).
+    - color: RGB color as an integer, for example 0xFF0000 for red.
+    """
+    try:
+        ableton = get_ableton_connection()
+        si = _to_zero_based(scene_index, "scene_index")
+        result = ableton.send_command("set_scene_color", {
+            "scene_index": si,
+            "color": color,
+        })
+        return f"Set scene {scene_index} color to {hex(result.get('color', color))}"
+    except Exception as e:
+        logger.error(f"Error setting scene color: {str(e)}")
+        return f"Error setting scene color: {str(e)}"
+
+
+@mcp.tool()
+def set_scene_tempo(ctx: Context, scene_index: int, tempo: float) -> str:
+    """
+    Set or clear a Session View scene tempo override.
+
+    Parameters:
+    - scene_index: Scene number (1-based).
+    - tempo: BPM value. Use 0.0 to clear the override.
+    """
+    try:
+        ableton = get_ableton_connection()
+        si = _to_zero_based(scene_index, "scene_index")
+        result = ableton.send_command("set_scene_tempo", {
+            "scene_index": si,
+            "tempo": tempo,
+        })
+        tempo_value = result.get("tempo", 0.0)
+        tempo_text = f"{tempo_value:.1f} BPM" if tempo_value else "cleared"
+        return f"Scene {scene_index} tempo {tempo_text}"
+    except Exception as e:
+        logger.error(f"Error setting scene tempo: {str(e)}")
+        return f"Error setting scene tempo: {str(e)}"
+
+
+@mcp.tool()
+def stop_all_clips(ctx: Context) -> str:
+    """Stop all currently playing Session View clips."""
+    try:
+        ableton = get_ableton_connection()
+        ableton.send_command("stop_all_clips", {})
+        return "Stopped all clips"
+    except Exception as e:
+        logger.error(f"Error stopping all clips: {str(e)}")
+        return f"Error stopping all clips: {str(e)}"
+
 
 @mcp.tool()
 def set_tempo(ctx: Context, tempo: float) -> str:
@@ -2041,7 +2576,7 @@ def delete_device(
     """Delete a device from a track.
 
     Parameters:
-    - track_index: Track number (1-based).
+    - track_index: Track number (1-based). Return tracks come after session tracks.
     - device_index: Device number (1-based).
     - device_name: Device name (alternative to device_index).
     """

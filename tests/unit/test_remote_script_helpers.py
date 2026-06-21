@@ -112,6 +112,18 @@ def _make_script(tracks=()):
     script._song.scenes = []
     script._song.return_tracks = []
     script._song.master_track = MagicMock()
+    script._song.current_song_time = 0.0
+    script._song.signature_numerator = 4
+    script._song.signature_denominator = 4
+    script._song.metronome = False
+    script._song.overdub = False
+    script._song.session_record = False
+    script._song.record_mode = False
+    script._song.nudge_up = False
+    script._song.nudge_down = False
+    script._song.tempo = 120.0
+    script._song.punch_in = False
+    script._song.punch_out = False
     script._song.master_track.mixer_device.volume.value = 0.85
     script._song.master_track.mixer_device.volume.min = 0.0
     script._song.master_track.mixer_device.volume.max = 1.0
@@ -293,6 +305,70 @@ class TestMixerHelpers:
             "remaining_devices": 0,
         }
         assert return_track.devices == []
+
+
+class TestTransportHelpers:
+    def test_get_and_set_current_song_time(self):
+        script = _make_script()
+        script._song.current_song_time = 12.5
+
+        assert script._get_current_song_time() == {"current_song_time": 12.5}
+        assert script._set_current_song_time(16.0) == {"current_song_time": 16.0}
+
+    def test_rejects_negative_song_time(self):
+        script = _make_script()
+
+        try:
+            script._set_current_song_time(-1)
+            raised = False
+        except ValueError:
+            raised = True
+
+        assert raised is True
+
+    def test_set_time_signature(self):
+        script = _make_script()
+
+        result = script._set_time_signature(6, 8)
+
+        assert script._song.signature_numerator == 6
+        assert script._song.signature_denominator == 8
+        assert result == {"numerator": 6, "denominator": 8}
+
+    def test_rejects_invalid_time_signature(self):
+        script = _make_script()
+
+        try:
+            script._set_time_signature(4, 3)
+            raised = False
+        except ValueError:
+            raised = True
+
+        assert raised is True
+
+    def test_global_toggles(self):
+        script = _make_script()
+
+        assert script._set_metronome(True) == {"metronome": True}
+        assert script._set_overdub(True) == {"overdub": True}
+        assert script._set_session_record(True) == {"session_record": True}
+        assert script._set_arrangement_record(True) == {"arrangement_record": True}
+        assert script._set_nudge_up(True) == {"nudge_up": True}
+        assert script._set_nudge_down(True) == {"nudge_down": True}
+
+    def test_tap_undo_redo_and_punch_points(self):
+        script = _make_script()
+
+        assert script._tap_tempo() == {"tempo": 120.0}
+        script._song.tap_tempo.assert_called_once_with()
+        assert script._undo() == {"undone": True}
+        script._song.undo.assert_called_once_with()
+        assert script._redo() == {"redone": True}
+        script._song.redo.assert_called_once_with()
+        assert script._set_punch_points(True, False) == {
+            "punch_in": True,
+            "punch_out": False,
+        }
 
     def test_master_controls_clamp_values(self):
         script = _make_script()

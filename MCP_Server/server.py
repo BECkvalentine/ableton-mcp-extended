@@ -8,7 +8,7 @@ import threading
 import time
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Any, List, Union
+from typing import AsyncIterator, Dict, Any, List, Optional, Union
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -43,11 +43,19 @@ MUTATING_COMMANDS = frozenset({
     "load_instrument_or_effect",
     "manage_clip_automation",
     "navigate_preset",
+    "redo",
     "set_arrangement_clip_property",
     "set_arrangement_loop",
+    "set_arrangement_record",
     "set_clip_name",
+    "set_current_song_time",
     "set_master_panning",
     "set_master_volume",
+    "set_metronome",
+    "set_nudge_down",
+    "set_nudge_up",
+    "set_overdub",
+    "set_punch_points",
     "set_return_track_color",
     "set_return_track_mute",
     "set_return_track_name",
@@ -59,8 +67,10 @@ MUTATING_COMMANDS = frozenset({
     "set_device_enabled",
     "set_device_parameter",
     "set_send",
+    "set_session_record",
     "set_song_time",
     "set_tempo",
+    "set_time_signature",
     "set_track_arm",
     "set_track_color",
     "set_track_mute",
@@ -73,6 +83,8 @@ MUTATING_COMMANDS = frozenset({
     "stop_clip",
     "stop_all_clips",
     "stop_playback",
+    "tap_tempo",
+    "undo",
 })
 
 COMMAND_MUTATION_DELAY_SECONDS = 0.1
@@ -1298,6 +1310,223 @@ def stop_playback(ctx: Context) -> str:
     except Exception as e:
         logger.error(f"Error stopping playback: {str(e)}")
         return f"Error stopping playback: {str(e)}"
+
+
+@mcp.tool()
+def get_current_song_time(ctx: Context) -> str:
+    """Get the current playback position in beats."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_current_song_time", {})
+        return f"Current song time: {result.get('current_song_time', 0.0):.3f} beats"
+    except Exception as e:
+        logger.error(f"Error getting song time: {str(e)}")
+        return f"Error getting song time: {str(e)}"
+
+
+@mcp.tool()
+def set_current_song_time(ctx: Context, time: float) -> str:
+    """
+    Jump playback to a beat position.
+
+    Parameters:
+    - time: Position in beats, where 0 is the start of the set.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_current_song_time", {"time": time})
+        return f"Song time set to {result.get('current_song_time', time):.3f} beats"
+    except Exception as e:
+        logger.error(f"Error setting song time: {str(e)}")
+        return f"Error setting song time: {str(e)}"
+
+
+@mcp.tool()
+def set_time_signature(ctx: Context, numerator: int, denominator: int) -> str:
+    """
+    Set the song time signature.
+
+    Parameters:
+    - numerator: Top number, 1-99.
+    - denominator: Bottom number; must be one of 1, 2, 4, 8, 16, 32.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_time_signature", {
+            "numerator": numerator,
+            "denominator": denominator,
+        })
+        return f"Time signature set to {result.get('numerator', numerator)}/{result.get('denominator', denominator)}"
+    except Exception as e:
+        logger.error(f"Error setting time signature: {str(e)}")
+        return f"Error setting time signature: {str(e)}"
+
+
+@mcp.tool()
+def set_metronome(ctx: Context, metronome: bool) -> str:
+    """
+    Enable or disable the metronome.
+
+    Parameters:
+    - metronome: True to enable, False to disable.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_metronome", {"metronome": metronome})
+        state = "enabled" if result.get("metronome", metronome) else "disabled"
+        return f"Metronome {state}"
+    except Exception as e:
+        logger.error(f"Error setting metronome: {str(e)}")
+        return f"Error setting metronome: {str(e)}"
+
+
+@mcp.tool()
+def set_overdub(ctx: Context, overdub: bool) -> str:
+    """
+    Enable or disable overdub.
+
+    Parameters:
+    - overdub: True to enable, False to disable.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_overdub", {"overdub": overdub})
+        state = "enabled" if result.get("overdub", overdub) else "disabled"
+        return f"Overdub {state}"
+    except Exception as e:
+        logger.error(f"Error setting overdub: {str(e)}")
+        return f"Error setting overdub: {str(e)}"
+
+
+@mcp.tool()
+def set_session_record(ctx: Context, record: bool) -> str:
+    """
+    Enable or disable Session recording.
+
+    Parameters:
+    - record: True to enable Session record, False to disable.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_session_record", {"record": record})
+        state = "enabled" if result.get("session_record", record) else "disabled"
+        return f"Session record {state}"
+    except Exception as e:
+        logger.error(f"Error setting session record: {str(e)}")
+        return f"Error setting session record: {str(e)}"
+
+
+@mcp.tool()
+def set_arrangement_record(ctx: Context, record: bool) -> str:
+    """
+    Enable or disable Arrangement recording.
+
+    Parameters:
+    - record: True to enable Arrangement record, False to disable.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_arrangement_record", {"record": record})
+        state = "enabled" if result.get("arrangement_record", record) else "disabled"
+        return f"Arrangement record {state}"
+    except Exception as e:
+        logger.error(f"Error setting arrangement record: {str(e)}")
+        return f"Error setting arrangement record: {str(e)}"
+
+
+@mcp.tool()
+def set_nudge_up(ctx: Context, nudge: bool) -> str:
+    """
+    Set the nudge-up state. Use False to release immediately after testing.
+
+    Parameters:
+    - nudge: True to activate nudge up, False to release.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ableton.send_command("set_nudge_up", {"nudge": nudge})
+        return f"Nudge up {'activated' if nudge else 'released'}"
+    except Exception as e:
+        logger.error(f"Error setting nudge up: {str(e)}")
+        return f"Error setting nudge up: {str(e)}"
+
+
+@mcp.tool()
+def set_nudge_down(ctx: Context, nudge: bool) -> str:
+    """
+    Set the nudge-down state. Use False to release immediately after testing.
+
+    Parameters:
+    - nudge: True to activate nudge down, False to release.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ableton.send_command("set_nudge_down", {"nudge": nudge})
+        return f"Nudge down {'activated' if nudge else 'released'}"
+    except Exception as e:
+        logger.error(f"Error setting nudge down: {str(e)}")
+        return f"Error setting nudge down: {str(e)}"
+
+
+@mcp.tool()
+def tap_tempo(ctx: Context) -> str:
+    """Send one tap-tempo pulse. This can change tempo when called repeatedly."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("tap_tempo", {})
+        return f"Tap received. Current tempo: {result.get('tempo', 0.0):.2f} BPM"
+    except Exception as e:
+        logger.error(f"Error tapping tempo: {str(e)}")
+        return f"Error tapping tempo: {str(e)}"
+
+
+@mcp.tool()
+def undo(ctx: Context) -> str:
+    """Undo the last action in Ableton. Use carefully."""
+    try:
+        ableton = get_ableton_connection()
+        ableton.send_command("undo", {})
+        return "Undo successful"
+    except Exception as e:
+        logger.error(f"Error undoing: {str(e)}")
+        return f"Error undoing: {str(e)}"
+
+
+@mcp.tool()
+def redo(ctx: Context) -> str:
+    """Redo the last undone action in Ableton. Use carefully."""
+    try:
+        ableton = get_ableton_connection()
+        ableton.send_command("redo", {})
+        return "Redo successful"
+    except Exception as e:
+        logger.error(f"Error redoing: {str(e)}")
+        return f"Error redoing: {str(e)}"
+
+
+@mcp.tool()
+def set_punch_points(ctx: Context, punch_in: Optional[bool] = None, punch_out: Optional[bool] = None) -> str:
+    """
+    Enable or disable punch-in and punch-out recording.
+
+    Parameters:
+    - punch_in: Enable punch-in. Omit to leave unchanged.
+    - punch_out: Enable punch-out. Omit to leave unchanged.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_punch_points", {
+            "punch_in": punch_in,
+            "punch_out": punch_out,
+        })
+        return (
+            f"Punch in: {'on' if result.get('punch_in') else 'off'}, "
+            f"Punch out: {'on' if result.get('punch_out') else 'off'}"
+        )
+    except Exception as e:
+        logger.error(f"Error setting punch points: {str(e)}")
+        return f"Error setting punch points: {str(e)}"
+
 
 @mcp.tool()
 def get_browser_tree(ctx: Context, category_type: str = "all") -> str:

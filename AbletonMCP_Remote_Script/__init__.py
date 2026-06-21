@@ -229,6 +229,8 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_scenes()
             elif command_type == "get_return_tracks":
                 response["result"] = self._get_return_tracks()
+            elif command_type == "get_current_song_time":
+                response["result"] = self._get_current_song_time()
             # Commands that modify Live's state should be scheduled on the main thread
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "add_notes_to_clip", "set_clip_name",
@@ -256,7 +258,12 @@ class AbletonMCP(ControlSurface):
                                  "set_return_track_panning", "set_return_track_mute",
                                  "set_return_track_color", "set_master_volume",
                                  "set_master_panning", "set_send",
-                                 "load_device_on_return"]:
+                                 "load_device_on_return",
+                                 "set_current_song_time", "set_time_signature",
+                                 "set_metronome", "set_overdub",
+                                 "set_session_record", "set_arrangement_record",
+                                 "set_nudge_up", "set_nudge_down", "tap_tempo",
+                                 "undo", "redo", "set_punch_points"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -485,6 +492,41 @@ class AbletonMCP(ControlSurface):
                             rti = params.get("return_track_index", 0)
                             item_uri = params.get("item_uri", "")
                             result = self._load_device_on_return(rti, item_uri)
+                        elif command_type == "set_current_song_time":
+                            time_val = params.get("time", 0.0)
+                            result = self._set_current_song_time(time_val)
+                        elif command_type == "set_time_signature":
+                            numerator = params.get("numerator", None)
+                            denominator = params.get("denominator", None)
+                            result = self._set_time_signature(numerator, denominator)
+                        elif command_type == "set_metronome":
+                            metronome = params.get("metronome", False)
+                            result = self._set_metronome(metronome)
+                        elif command_type == "set_overdub":
+                            overdub = params.get("overdub", False)
+                            result = self._set_overdub(overdub)
+                        elif command_type == "set_session_record":
+                            record = params.get("record", False)
+                            result = self._set_session_record(record)
+                        elif command_type == "set_arrangement_record":
+                            record = params.get("record", False)
+                            result = self._set_arrangement_record(record)
+                        elif command_type == "set_nudge_up":
+                            nudge = params.get("nudge", False)
+                            result = self._set_nudge_up(nudge)
+                        elif command_type == "set_nudge_down":
+                            nudge = params.get("nudge", False)
+                            result = self._set_nudge_down(nudge)
+                        elif command_type == "tap_tempo":
+                            result = self._tap_tempo()
+                        elif command_type == "undo":
+                            result = self._undo()
+                        elif command_type == "redo":
+                            result = self._redo()
+                        elif command_type == "set_punch_points":
+                            punch_in = params.get("punch_in", None)
+                            punch_out = params.get("punch_out", None)
+                            result = self._set_punch_points(punch_in, punch_out)
                         elif command_type == "navigate_preset":
                             ti = params.get("track_index", 0)
                             di = params.get("device_index", 0)
@@ -1375,6 +1417,155 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error stopping playback: " + str(e))
+            raise
+
+    def _get_current_song_time(self):
+        """Return current playback position in beats."""
+        try:
+            return {"current_song_time": self._song.current_song_time}
+        except Exception as e:
+            self.log_message("Error getting song time: " + str(e))
+            raise
+
+    def _set_current_song_time(self, time):
+        """Jump playback position to a beat position."""
+        try:
+            if time < 0:
+                raise ValueError("Song time must be >= 0")
+            time = float(time)
+            self._song.current_song_time = time
+            return {"current_song_time": time}
+        except Exception as e:
+            self.log_message("Error setting song time: " + str(e))
+            raise
+
+    def _set_time_signature(self, numerator, denominator):
+        """Set the song time signature."""
+        try:
+            valid_denominators = [1, 2, 4, 8, 16, 32]
+            if numerator is None or denominator is None:
+                raise ValueError("numerator and denominator are required")
+            numerator = int(numerator)
+            denominator = int(denominator)
+            if numerator < 1 or numerator > 99:
+                raise ValueError("Numerator must be between 1 and 99")
+            if denominator not in valid_denominators:
+                raise ValueError("Denominator must be one of: 1, 2, 4, 8, 16, 32")
+            self._song.signature_numerator = numerator
+            self._song.signature_denominator = denominator
+            return {
+                "numerator": self._song.signature_numerator,
+                "denominator": self._song.signature_denominator,
+            }
+        except Exception as e:
+            self.log_message("Error setting time signature: " + str(e))
+            raise
+
+    def _set_metronome(self, metronome):
+        """Enable or disable the metronome."""
+        try:
+            metronome = bool(metronome)
+            self._song.metronome = metronome
+            return {"metronome": metronome}
+        except Exception as e:
+            self.log_message("Error setting metronome: " + str(e))
+            raise
+
+    def _set_overdub(self, overdub):
+        """Enable or disable overdub."""
+        try:
+            overdub = bool(overdub)
+            self._song.overdub = overdub
+            return {"overdub": overdub}
+        except Exception as e:
+            self.log_message("Error setting overdub: " + str(e))
+            raise
+
+    def _set_session_record(self, record):
+        """Enable or disable Session recording."""
+        try:
+            record = bool(record)
+            self._song.session_record = record
+            return {"session_record": record}
+        except Exception as e:
+            self.log_message("Error setting session record: " + str(e))
+            raise
+
+    def _set_arrangement_record(self, record):
+        """Enable or disable Arrangement recording."""
+        try:
+            record = bool(record)
+            self._song.record_mode = record
+            return {"arrangement_record": record}
+        except Exception as e:
+            self.log_message("Error setting arrangement record: " + str(e))
+            raise
+
+    def _set_nudge_up(self, nudge):
+        """Set nudge-up state."""
+        try:
+            nudge = bool(nudge)
+            self._song.nudge_up = nudge
+            return {"nudge_up": nudge}
+        except Exception as e:
+            self.log_message("Error setting nudge up: " + str(e))
+            raise
+
+    def _set_nudge_down(self, nudge):
+        """Set nudge-down state."""
+        try:
+            nudge = bool(nudge)
+            self._song.nudge_down = nudge
+            return {"nudge_down": nudge}
+        except Exception as e:
+            self.log_message("Error setting nudge down: " + str(e))
+            raise
+
+    def _tap_tempo(self):
+        """Send one tap-tempo pulse."""
+        try:
+            self._song.tap_tempo()
+            return {"tempo": self._song.tempo}
+        except Exception as e:
+            self.log_message("Error tapping tempo: " + str(e))
+            raise
+
+    def _undo(self):
+        """Undo the last action."""
+        try:
+            self._song.undo()
+            return {"undone": True}
+        except Exception as e:
+            self.log_message("Error undoing: " + str(e))
+            raise
+
+    def _redo(self):
+        """Redo the last undone action."""
+        try:
+            self._song.redo()
+            return {"redone": True}
+        except Exception as e:
+            self.log_message("Error redoing: " + str(e))
+            raise
+
+    def _set_punch_points(self, punch_in, punch_out):
+        """Set punch in/out state."""
+        try:
+            result = {
+                "punch_in": self._song.punch_in,
+                "punch_out": self._song.punch_out,
+            }
+            if punch_in is not None:
+                punch_in = bool(punch_in)
+                self._song.punch_in = punch_in
+                result["punch_in"] = punch_in
+            if punch_out is not None:
+                punch_out = bool(punch_out)
+                self._song.punch_out = punch_out
+                result["punch_out"] = punch_out
+            return result
+        except Exception as e:
+            self.log_message("Error setting punch points: " + str(e))
             raise
 
     # Browser helper methods

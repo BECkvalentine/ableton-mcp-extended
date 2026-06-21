@@ -18,6 +18,7 @@ logger = logging.getLogger("AbletonMCPServer")
 MUTATING_COMMANDS = frozenset({
     "add_notes_to_arrangement_clip",
     "add_notes_to_clip",
+    "apply_note_modifications",
     "control_arrangement_view",
     "create_arrangement_audio_clip",
     "create_arrangement_clip",
@@ -33,6 +34,7 @@ MUTATING_COMMANDS = frozenset({
     "delete_return_track",
     "delete_scene",
     "delete_track",
+    "duplicate_clip",
     "duplicate_to_arrangement",
     "duplicate_scene",
     "fire_clip",
@@ -43,11 +45,15 @@ MUTATING_COMMANDS = frozenset({
     "load_instrument_or_effect",
     "manage_clip_automation",
     "navigate_preset",
+    "quantize_clip",
     "redo",
+    "remove_notes_from_clip",
     "set_arrangement_clip_property",
     "set_arrangement_loop",
     "set_arrangement_record",
     "set_clip_name",
+    "set_clip_color",
+    "set_clip_loop",
     "set_current_song_time",
     "set_master_panning",
     "set_master_volume",
@@ -1018,6 +1024,271 @@ def set_clip_name(ctx: Context, track_index: int, clip_index: int, name: str) ->
     except Exception as e:
         logger.error(f"Error setting clip name: {str(e)}")
         return f"Error setting clip name: {str(e)}"
+
+
+@mcp.tool()
+def get_clip_info(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get detailed information about a Session View clip.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("get_clip_info", {
+            "track_index": ti,
+            "clip_index": ci,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting clip info: {str(e)}")
+        return f"Error getting clip info: {str(e)}"
+
+
+@mcp.tool()
+def get_clip_slot_info(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get state for a Session View clip slot.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("get_clip_slot_info", {
+            "track_index": ti,
+            "clip_index": ci,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting clip slot info: {str(e)}")
+        return f"Error getting clip slot info: {str(e)}"
+
+
+@mcp.tool()
+def get_notes_from_clip(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get MIDI notes from a Session View clip.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("get_notes_from_clip", {
+            "track_index": ti,
+            "clip_index": ci,
+        })
+        notes = result.get("notes", [])
+        lines = [
+            f"Clip '{result.get('clip_name')}' "
+            f"(length {result.get('clip_length')} beats) has {len(notes)} note(s):"
+        ]
+        for note in notes:
+            lines.append(
+                f"  pitch={note['pitch']} start={note['start_time']:.3f} "
+                f"dur={note['duration']:.3f} vel={note['velocity']} "
+                f"mute={note['mute']}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error getting notes from clip: {str(e)}")
+        return f"Error getting notes from clip: {str(e)}"
+
+
+@mcp.tool()
+def remove_notes_from_clip(ctx: Context, track_index: int, clip_index: int,
+                           from_pitch: int = 0, pitch_span: int = 128,
+                           from_time: float = 0.0,
+                           time_span: float = 1000000000.0) -> str:
+    """
+    Remove MIDI notes from a clip within a pitch/time range.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - from_pitch: Lowest pitch to remove (0-127, default 0).
+    - pitch_span: Number of pitches to cover (default 128 = all).
+    - from_time: Start time in beats.
+    - time_span: Duration in beats to cover.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        ableton.send_command("remove_notes_from_clip", {
+            "track_index": ti,
+            "clip_index": ci,
+            "from_pitch": from_pitch,
+            "pitch_span": pitch_span,
+            "from_time": from_time,
+            "time_span": time_span,
+        })
+        return f"Removed notes from track {track_index}, slot {clip_index}"
+    except Exception as e:
+        logger.error(f"Error removing notes from clip: {str(e)}")
+        return f"Error removing notes from clip: {str(e)}"
+
+
+@mcp.tool()
+def apply_note_modifications(ctx: Context, track_index: int, clip_index: int,
+                             notes: List[Dict[str, Union[int, float, bool]]]) -> str:
+    """
+    Modify existing MIDI notes in place.
+
+    Each note identifies the current note by pitch and start_time, then supplies
+    one or more new_* fields.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - notes: Modification dictionaries with pitch, start_time, and optional
+      new_pitch, new_start_time, new_duration, new_velocity, new_mute.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("apply_note_modifications", {
+            "track_index": ti,
+            "clip_index": ci,
+            "notes": notes,
+        })
+        return f"Updated {result.get('updated', 0)} note(s) in track {track_index}, slot {clip_index}"
+    except Exception as e:
+        logger.error(f"Error applying note modifications: {str(e)}")
+        return f"Error applying note modifications: {str(e)}"
+
+
+@mcp.tool()
+def set_clip_loop(ctx: Context, track_index: int, clip_index: int,
+                  loop_start: float, loop_end: float,
+                  loop_on: bool = True) -> str:
+    """
+    Set loop bounds and looping state for a Session View clip.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - loop_start: Loop start in beats.
+    - loop_end: Loop end in beats.
+    - loop_on: Whether looping is enabled.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("set_clip_loop", {
+            "track_index": ti,
+            "clip_index": ci,
+            "loop_start": loop_start,
+            "loop_end": loop_end,
+            "loop_on": loop_on,
+        })
+        return (
+            f"Loop set on track {track_index}, slot {clip_index}: "
+            f"start={result.get('loop_start')} end={result.get('loop_end')} "
+            f"looping={result.get('looping')}"
+        )
+    except Exception as e:
+        logger.error(f"Error setting clip loop: {str(e)}")
+        return f"Error setting clip loop: {str(e)}"
+
+
+@mcp.tool()
+def set_clip_color(ctx: Context, track_index: int, clip_index: int,
+                   color: int) -> str:
+    """
+    Set a Session View clip color.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - color: RGB color as an integer, for example 0xFF0000 for red.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("set_clip_color", {
+            "track_index": ti,
+            "clip_index": ci,
+            "color": color,
+        })
+        return f"Clip color set to {hex(result.get('color', color))}"
+    except Exception as e:
+        logger.error(f"Error setting clip color: {str(e)}")
+        return f"Error setting clip color: {str(e)}"
+
+
+@mcp.tool()
+def duplicate_clip(ctx: Context, track_index: int, clip_index: int,
+                   target_clip_index: int) -> str:
+    """
+    Duplicate a Session View clip into another slot on the same track.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Source clip slot number (1-based).
+    - target_clip_index: Destination clip slot number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        target_ci = _to_zero_based(target_clip_index, "target_clip_index")
+        result = ableton.send_command("duplicate_clip", {
+            "track_index": ti,
+            "clip_index": ci,
+            "target_clip_index": target_ci,
+        })
+        return (
+            f"Duplicated clip from slot {clip_index} to slot {target_clip_index} "
+            f"on track {track_index}: '{result.get('clip_name')}'"
+        )
+    except Exception as e:
+        logger.error(f"Error duplicating clip: {str(e)}")
+        return f"Error duplicating clip: {str(e)}"
+
+
+@mcp.tool()
+def quantize_clip(ctx: Context, track_index: int, clip_index: int,
+                  quantize_to: float = 0.25, amount: float = 1.0) -> str:
+    """
+    Quantize notes in a MIDI clip.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - quantize_to: 1.0=quarter, 0.5=8th, 0.25=16th, 0.125=32nd.
+    - amount: Quantize strength from 0.0 to 1.0.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("quantize_clip", {
+            "track_index": ti,
+            "clip_index": ci,
+            "quantize_to": quantize_to,
+            "amount": amount,
+        })
+        return (
+            f"Quantized track {track_index}, slot {clip_index} "
+            f"to {result.get('quantize_to')} with amount {result.get('amount')}"
+        )
+    except Exception as e:
+        logger.error(f"Error quantizing clip: {str(e)}")
+        return f"Error quantizing clip: {str(e)}"
 
 
 @mcp.tool()

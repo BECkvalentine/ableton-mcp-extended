@@ -22,6 +22,7 @@ sys.modules.setdefault("_Framework.ControlSurface", _cs_module)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+import AbletonMCP_Remote_Script as remote_script  # noqa: E402
 from AbletonMCP_Remote_Script import AbletonMCP  # noqa: E402
 
 
@@ -102,6 +103,67 @@ class _Scene:
         self.color = color
         self.tempo = tempo
         self.fire = MagicMock()
+
+
+class _ClipSlot:
+    def __init__(self, clip=None):
+        self.clip = clip
+        self.has_clip = clip is not None
+        self.has_stop_button = True
+        self.is_triggered = False
+
+    def duplicate_clip_to(self, target_slot):
+        target_slot.clip = self.clip.clone()
+        target_slot.has_clip = True
+
+
+class _Note:
+    def __init__(self, pitch=60, start_time=0.0, duration=1.0,
+                 velocity=100, mute=False):
+        self.pitch = pitch
+        self.start_time = start_time
+        self.duration = duration
+        self.velocity = velocity
+        self.mute = mute
+
+
+class _MidiClip:
+    is_audio_clip = False
+    is_midi_clip = True
+    is_playing = False
+    is_recording = False
+
+    def __init__(self, name="Clip", length=4.0, notes=None):
+        self.name = name
+        self.length = length
+        self.color = 0
+        self.looping = True
+        self.loop_start = 0.0
+        self.loop_end = length
+        self.start_marker = 0.0
+        self.end_marker = length
+        self.notes = list(notes or [])
+        self.added_notes = None
+        self.quantize_calls = []
+
+    def clone(self):
+        return _MidiClip(self.name, self.length, list(self.notes))
+
+    def set_notes(self, notes):
+        self.added_notes = tuple(notes)
+
+    def get_notes_extended(self, **kwargs):
+        return self.notes
+
+    def remove_notes_extended(self, **kwargs):
+        self.remove_args = kwargs
+        self.notes = []
+
+    def apply_note_modifications(self, notes):
+        self.notes = list(notes)
+
+    def quantize(self, quantize_to, amount):
+        self.quantize_calls.append((quantize_to, amount))
 
 
 def _make_script(tracks=()):
@@ -518,3 +580,113 @@ class TestSceneManagement:
 
         script._song.stop_all_clips.assert_called_once_with()
         assert result == {"stopped": True}
+
+
+class TestSessionClipHelpers:
+    def test_add_notes_uses_live_note_specifications_when_available(self):
+        class _Spec:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        live_stub = types.SimpleNamespace(
+            Clip=types.SimpleNamespace(MidiNoteSpecification=_Spec))
+        original_live = remote_script.Live
+        remote_script.Live = live_stub
+        try:
+            clip = _MidiClip("Verse")
+            clip.add_new_notes = MagicMock()
+            track = _NormalTrack("Keys")
+            track.clip_slots = [_ClipSlot(clip)]
+            script = _make_script([track])
+
+            result = script._add_notes_to_clip(0, 0, [
+                {"pitch": 64, "start_time": 0.5, "duration": 1.0,
+                 "velocity": 90, "mute": False}
+            ])
+
+            spec = clip.add_new_notes.call_args[0][0][0]
+            assert spec.pitch == 64
+            assert spec.start_time == 0.5
+            assert result == {"note_count": 1}
+        finally:
+            remote_script.Live = original_live
+
+    def test_add_notes_falls_back_to_legacy_tuple_payload(self):
+        original_live = remote_script.Live
+        remote_script.Live = None
+        try:
+            clip = _MidiClip("Verse")
+            track = _NormalTrack("Keys")
+            track.clip_slots = [_ClipSlot(clip)]
+            script = _make_script([track])
+
+            script._add_notes_to_clip(0, 0, [{"pitch": 60}])
+
+            assert clip.added_notes == ((60, 0.0, 0.25, 100, False),)
+        finally:
+            remote_script.Live = original_live
+
+    def test_get_clip_and_slot_info(self):
+        clip = _MidiClip("Verse", length=8.0)
+        track = _NormalTrack("Keys")
+        track.clip_slots = [_ClipSlot(clip)]
+        script = _make_script([track])
+
+        clip_info = script._get_clip_info(0, 0)
+        slot_info = script._get_clip_slot_info(0, 0)
+
+        assert clip_info["name"] == "Verse"
+        assert clip_info["length"] == 8.0
+        assert slot_info["has_clip"] is True
+        assert slot_info["clip"]["name"] == "Verse"
+
+    def test_get_remove_and_modify_notes(self):
+        note = _Note(pitch=60, start_time=0.0)
+        clip = _MidiClip("Verse", notes=[note])
+        track = _NormalTrack("Keys")
+        track.clip_slots = [_ClipSlot(clip)]
+        script = _make_script([track])
+
+        notes_result = script._get_notes_from_clip(0, 0)
+        update_result = script._apply_note_modifications(0, 0, [{
+            "pitch": 60,
+            "start_time": 0.0,
+            "new_pitch": 62,
+            "new_velocity": 80,
+        }])
+        remove_result = script._remove_notes_from_clip(0, 0, 0, 128, 0.0, 4.0)
+
+        assert notes_result["notes"][0]["pitch"] == 60
+        assert update_result == {"updated": 1}
+        assert note.pitch == 62
+        assert note.velocity == 80
+        assert remove_result == {"removed": True, "track_index": 0, "clip_index": 0}
+        assert clip.notes == []
+
+    def test_clip_loop_color_duplicate_and_quantize(self):
+        clip = _MidiClip("Verse")
+        track = _NormalTrack("Keys")
+        target_slot = _ClipSlot()
+        track.clip_slots = [_ClipSlot(clip), target_slot]
+        script = _make_script([track])
+
+        loop_result = script._set_clip_loop(0, 0, 1.0, 3.0, True)
+        color_result = script._set_clip_color(0, 0, 0x336699)
+        duplicate_result = script._duplicate_clip(0, 0, 1)
+        quantize_result = script._quantize_clip(0, 0, 0.25, 0.75)
+
+        assert loop_result == {"loop_start": 1.0, "loop_end": 3.0, "looping": True}
+        assert color_result == {"color": 0x336699}
+        assert target_slot.has_clip is True
+        assert duplicate_result == {
+            "source_clip_index": 0,
+            "target_clip_index": 1,
+            "clip_name": "Verse",
+        }
+        assert clip.quantize_calls == [(5, 0.75)]
+        assert quantize_result == {
+            "track_index": 0,
+            "clip_index": 0,
+            "quantize_to": 0.25,
+            "amount": 0.75,
+        }

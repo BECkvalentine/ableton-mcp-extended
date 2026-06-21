@@ -2,6 +2,10 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 from _Framework.ControlSurface import ControlSurface
+try:
+    import Live
+except ImportError:
+    Live = None
 import socket
 import json
 import threading
@@ -231,9 +235,24 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_return_tracks()
             elif command_type == "get_current_song_time":
                 response["result"] = self._get_current_song_time()
+            elif command_type == "get_clip_info":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_info(track_index, clip_index)
+            elif command_type == "get_clip_slot_info":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_slot_info(track_index, clip_index)
+            elif command_type == "get_notes_from_clip":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_notes_from_clip(track_index, clip_index)
             # Commands that modify Live's state should be scheduled on the main thread
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "add_notes_to_clip", "set_clip_name",
+                                 "remove_notes_from_clip", "apply_note_modifications",
+                                 "set_clip_loop", "set_clip_color",
+                                 "duplicate_clip", "quantize_clip",
                                  "create_scene", "delete_scene", "duplicate_scene",
                                  "fire_scene", "set_scene_name", "set_scene_color",
                                  "set_scene_tempo", "stop_all_clips",
@@ -293,6 +312,48 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             name = params.get("name", "")
                             result = self._set_clip_name(track_index, clip_index, name)
+                        elif command_type == "remove_notes_from_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._remove_notes_from_clip(
+                                track_index,
+                                clip_index,
+                                params.get("from_pitch", 0),
+                                params.get("pitch_span", 128),
+                                params.get("from_time", 0.0),
+                                params.get("time_span", 1000000000.0))
+                        elif command_type == "apply_note_modifications":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            notes = params.get("notes", [])
+                            result = self._apply_note_modifications(track_index, clip_index, notes)
+                        elif command_type == "set_clip_loop":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._set_clip_loop(
+                                track_index,
+                                clip_index,
+                                params.get("loop_start", 0.0),
+                                params.get("loop_end", 4.0),
+                                params.get("loop_on", True))
+                        elif command_type == "set_clip_color":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            color = params.get("color", 0)
+                            result = self._set_clip_color(track_index, clip_index, color)
+                        elif command_type == "duplicate_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            target_clip_index = params.get("target_clip_index", 0)
+                            result = self._duplicate_clip(track_index, clip_index, target_clip_index)
+                        elif command_type == "quantize_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._quantize_clip(
+                                track_index,
+                                clip_index,
+                                params.get("quantize_to", 0.25),
+                                params.get("amount", 1.0))
                         elif command_type == "set_scene_name":
                             scene_index = params.get("scene_index", 0)
                             name = params.get("name", "")
@@ -902,6 +963,61 @@ class AbletonMCP(ControlSurface):
             raise IndexError("Return track index out of range")
         return self._song.return_tracks[return_track_index]
 
+    def _get_clip(self, track_index, clip_index):
+        """Resolve a Session View clip by zero-based track and slot index."""
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+
+        track = self._song.tracks[track_index]
+
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("Clip index out of range")
+
+        clip_slot = track.clip_slots[clip_index]
+
+        if not clip_slot.has_clip:
+            raise Exception("No clip in slot")
+
+        return clip_slot.clip
+
+    def _serialize_clip(self, clip, track_index, clip_index):
+        return {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "name": clip.name,
+            "length": clip.length,
+            "color": clip.color,
+            "is_audio_clip": clip.is_audio_clip,
+            "is_midi_clip": clip.is_midi_clip,
+            "is_playing": clip.is_playing,
+            "is_recording": clip.is_recording,
+            "loop_on": clip.looping,
+            "loop_start": clip.loop_start,
+            "loop_end": clip.loop_end,
+            "start_marker": clip.start_marker,
+            "end_marker": clip.end_marker,
+        }
+
+    def _make_midi_note_specification(self, note):
+        """Normalize accepted note dictionaries to Live 11+ note specs."""
+        pitch = int(note.get("pitch", 60))
+        start_time = float(note.get("start_time", 0.0))
+        duration = float(note.get("duration", 0.25))
+        velocity = int(note.get("velocity", 100))
+        mute = bool(note.get("mute", False))
+
+        if Live is not None:
+            midi_note_spec = getattr(getattr(Live, "Clip", None), "MidiNoteSpecification", None)
+            if midi_note_spec is not None:
+                return midi_note_spec(
+                    pitch=pitch,
+                    start_time=start_time,
+                    duration=duration,
+                    velocity=velocity,
+                    mute=mute)
+
+        return (pitch, start_time, duration, velocity, mute)
+
     def _set_track_mute(self, track_index, mute):
         """Mute or unmute a session track."""
         try:
@@ -1162,20 +1278,13 @@ class AbletonMCP(ControlSurface):
                 raise Exception("No clip in slot")
             
             clip = clip_slot.clip
-            
-            # Convert note data to Live's format
-            live_notes = []
-            for note in notes:
-                pitch = note.get("pitch", 60)
-                start_time = note.get("start_time", 0.0)
-                duration = note.get("duration", 0.25)
-                velocity = note.get("velocity", 100)
-                mute = note.get("mute", False)
-                
-                live_notes.append((pitch, start_time, duration, velocity, mute))
-            
-            # Add the notes
-            clip.set_notes(tuple(live_notes))
+
+            live_notes = [self._make_midi_note_specification(note) for note in notes]
+
+            if hasattr(clip, "add_new_notes") and Live is not None:
+                clip.add_new_notes(tuple(live_notes))
+            else:
+                clip.set_notes(tuple(live_notes))
             
             result = {
                 "note_count": len(notes)
@@ -1188,20 +1297,7 @@ class AbletonMCP(ControlSurface):
     def _set_clip_name(self, track_index, clip_index, name):
         """Set the name of a clip"""
         try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-            
-            track = self._song.tracks[track_index]
-            
-            if clip_index < 0 or clip_index >= len(track.clip_slots):
-                raise IndexError("Clip index out of range")
-            
-            clip_slot = track.clip_slots[clip_index]
-            
-            if not clip_slot.has_clip:
-                raise Exception("No clip in slot")
-            
-            clip = clip_slot.clip
+            clip = self._get_clip(track_index, clip_index)
             clip.name = name
             
             result = {
@@ -1210,6 +1306,201 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error setting clip name: " + str(e))
+            raise
+
+    def _get_clip_info(self, track_index, clip_index):
+        """Get detailed information about a Session View clip."""
+        try:
+            clip = self._get_clip(track_index, clip_index)
+            return self._serialize_clip(clip, track_index, clip_index)
+        except Exception as e:
+            self.log_message("Error getting clip info: " + str(e))
+            raise
+
+    def _get_clip_slot_info(self, track_index, clip_index):
+        """Get state for a Session View clip slot."""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            slot = track.clip_slots[clip_index]
+            clip_info = None
+            if slot.has_clip:
+                clip_info = self._serialize_clip(slot.clip, track_index, clip_index)
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "has_clip": slot.has_clip,
+                "has_stop_button": slot.has_stop_button,
+                "is_triggered": slot.is_triggered,
+                "clip": clip_info,
+            }
+        except Exception as e:
+            self.log_message("Error getting clip slot info: " + str(e))
+            raise
+
+    def _get_notes_from_clip(self, track_index, clip_index):
+        """Get all MIDI notes from a clip."""
+        try:
+            clip = self._get_clip(track_index, clip_index)
+            if not clip.is_midi_clip:
+                raise Exception("Clip is not a MIDI clip")
+            notes = clip.get_notes_extended(
+                from_pitch=0, pitch_span=128, from_time=0, time_span=clip.length)
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "clip_name": clip.name,
+                "clip_length": clip.length,
+                "notes": [
+                    {
+                        "pitch": note.pitch,
+                        "start_time": note.start_time,
+                        "duration": note.duration,
+                        "velocity": note.velocity,
+                        "mute": note.mute,
+                    }
+                    for note in notes
+                ],
+            }
+        except Exception as e:
+            self.log_message("Error getting notes: " + str(e))
+            raise
+
+    def _remove_notes_from_clip(self, track_index, clip_index,
+                                from_pitch, pitch_span, from_time, time_span):
+        """Remove notes from a MIDI clip within a pitch/time range."""
+        try:
+            clip = self._get_clip(track_index, clip_index)
+            if not clip.is_midi_clip:
+                raise Exception("Clip is not a MIDI clip")
+            clip.remove_notes_extended(
+                from_pitch=int(from_pitch),
+                pitch_span=int(pitch_span),
+                from_time=float(from_time),
+                time_span=float(time_span))
+            return {
+                "removed": True,
+                "track_index": track_index,
+                "clip_index": clip_index,
+            }
+        except Exception as e:
+            self.log_message("Error removing notes: " + str(e))
+            raise
+
+    def _apply_note_modifications(self, track_index, clip_index, notes):
+        """Modify existing notes in place using Live's note modification API."""
+        try:
+            clip = self._get_clip(track_index, clip_index)
+            if not clip.is_midi_clip:
+                raise Exception("Clip is not a MIDI clip")
+            all_notes = clip.get_notes_extended(
+                from_pitch=0, pitch_span=128, from_time=0, time_span=clip.length)
+            note_map = {(note.pitch, round(note.start_time, 6)): note for note in all_notes}
+            updated = 0
+            for mod in notes:
+                key = (mod["pitch"], round(mod["start_time"], 6))
+                note = note_map.get(key)
+                if note is None:
+                    continue
+                if "new_pitch" in mod:
+                    note.pitch = mod["new_pitch"]
+                if "new_start_time" in mod:
+                    note.start_time = mod["new_start_time"]
+                if "new_duration" in mod:
+                    note.duration = mod["new_duration"]
+                if "new_velocity" in mod:
+                    note.velocity = mod["new_velocity"]
+                if "new_mute" in mod:
+                    note.mute = mod["new_mute"]
+                updated += 1
+            clip.apply_note_modifications(all_notes)
+            return {"updated": updated}
+        except Exception as e:
+            self.log_message("Error applying note modifications: " + str(e))
+            raise
+
+    def _set_clip_loop(self, track_index, clip_index, loop_start, loop_end, loop_on):
+        """Set clip loop bounds and enable/disable looping."""
+        try:
+            clip = self._get_clip(track_index, clip_index)
+            clip.loop_start = float(loop_start)
+            clip.loop_end = float(loop_end)
+            clip.looping = bool(loop_on)
+            return {
+                "loop_start": clip.loop_start,
+                "loop_end": clip.loop_end,
+                "looping": clip.looping,
+            }
+        except Exception as e:
+            self.log_message("Error setting clip loop: " + str(e))
+            raise
+
+    def _set_clip_color(self, track_index, clip_index, color):
+        """Set clip color using Live's integer color value."""
+        try:
+            clip = self._get_clip(track_index, clip_index)
+            clip.color = int(color)
+            return {"color": clip.color}
+        except Exception as e:
+            self.log_message("Error setting clip color: " + str(e))
+            raise
+
+    def _duplicate_clip(self, track_index, clip_index, target_clip_index):
+        """Duplicate a Session View clip into another slot on the same track."""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Source clip index out of range")
+            if target_clip_index < 0 or target_clip_index >= len(track.clip_slots):
+                raise IndexError("Target clip index out of range")
+            source_slot = track.clip_slots[clip_index]
+            target_slot = track.clip_slots[target_clip_index]
+            if not source_slot.has_clip:
+                raise Exception("No clip in source slot")
+            if target_slot.has_clip:
+                raise Exception("Target slot already has a clip")
+            source_slot.duplicate_clip_to(target_slot)
+            return {
+                "source_clip_index": clip_index,
+                "target_clip_index": target_clip_index,
+                "clip_name": target_slot.clip.name if target_slot.has_clip else "",
+            }
+        except Exception as e:
+            self.log_message("Error duplicating clip: " + str(e))
+            raise
+
+    def _quantize_clip(self, track_index, clip_index, quantize_to, amount):
+        """Quantize notes in a MIDI clip."""
+        quantize_map = {1.0: 1, 0.5: 2, 0.25: 5, 0.125: 8}
+        quantize_to = float(quantize_to)
+        quantize_enum = quantize_map.get(quantize_to)
+        if quantize_enum is None:
+            raise Exception(
+                "Invalid quantize_to value: {0}. Use 1.0, 0.5, 0.25, or 0.125".format(
+                    quantize_to))
+        try:
+            clip = self._get_clip(track_index, clip_index)
+            if not clip.is_midi_clip:
+                raise Exception("Clip is not a MIDI clip")
+            amount = float(amount)
+            clip.quantize(quantize_enum, amount)
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "quantize_to": quantize_to,
+                "amount": amount,
+            }
+        except Exception as e:
+            self.log_message("Error quantizing clip: " + str(e))
             raise
 
     def _resolve_scene(self, scene_index):

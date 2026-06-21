@@ -274,6 +274,7 @@ class AbletonMCP(ControlSurface):
                                  "set_song_time", "set_arrangement_loop", "jump_to_cue",
                                  "create_cue_point", "delete_cue_point",
                                  "create_arrangement_clip", "create_arrangement_audio_clip",
+                                 "copy_arrangement_audio_clip_to_session",
                                  "duplicate_to_arrangement", "delete_arrangement_clip",
                                  "set_arrangement_clip_property",
                                  "set_view", "control_arrangement_view",
@@ -479,6 +480,15 @@ class AbletonMCP(ControlSurface):
                             pos = params.get("position", 0.0)
                             fp = params.get("file_path", "")
                             result = self._create_arrangement_audio_clip(ti, pos, fp)
+                        elif command_type == "copy_arrangement_audio_clip_to_session":
+                            result = self._copy_arrangement_audio_clip_to_session(
+                                params.get("source_track_index", 0),
+                                params.get("arrangement_clip_index", 0),
+                                params.get("target_track_index", -1),
+                                params.get("target_clip_index", 0),
+                                params.get("create_missing_scenes", True),
+                                params.get("target_track_name", "Arrangement Audio Fixture"),
+                                params.get("source_file_path", ""))
                         elif command_type == "duplicate_to_arrangement":
                             ti = params.get("track_index", 0)
                             ci = params.get("clip_index", 0)
@@ -690,6 +700,8 @@ class AbletonMCP(ControlSurface):
             elif command_type == "get_arrangement_info":
                 track_index = params.get("track_index", -1)
                 response["result"] = self._get_arrangement_info(track_index)
+            elif command_type == "get_arrangement_loop":
+                response["result"] = self._get_arrangement_loop()
             elif command_type == "get_cue_points":
                 response["result"] = self._get_cue_points()
             # Device read-only commands
@@ -724,6 +736,19 @@ class AbletonMCP(ControlSurface):
     def _get_arrangement_clip_info(self, clip):
         """Serialize a Clip object to ArrangementClipInfo dict."""
         try:
+            sample_path = ""
+            sample_name = ""
+            try:
+                if hasattr(clip, "sample") and clip.sample is not None:
+                    sample_path = getattr(clip.sample, "file_path", "") or ""
+                    raw_sample_name = getattr(clip.sample, "name", "") or ""
+                    sample_name = (
+                        raw_sample_name
+                        if isinstance(raw_sample_name, str) else "")
+            except Exception as e:
+                self.log_message("Could not get arrangement clip sample path: " + str(e))
+
+            warp_mode = int(clip.warp_mode) if hasattr(clip, "warp_mode") else None
             return {
                 "name": clip.name,
                 "start_time": clip.start_time,
@@ -736,6 +761,23 @@ class AbletonMCP(ControlSurface):
                 "looping": clip.looping,
                 "loop_start": clip.loop_start,
                 "loop_end": clip.loop_end,
+                "start_marker": clip.start_marker,
+                "end_marker": clip.end_marker,
+                "sample_path": sample_path,
+                "sample_name": sample_name,
+                "gain": clip.gain if hasattr(clip, "gain") else None,
+                "gain_display_string": (
+                    clip.gain_display_string
+                    if hasattr(clip, "gain_display_string") else ""),
+                "warping": clip.warping if hasattr(clip, "warping") else None,
+                "warp_mode": warp_mode,
+                "warp_mode_name": (
+                    self.WARP_MODES.get(warp_mode, "Unknown")
+                    if warp_mode is not None else ""),
+                "pitch_coarse": (
+                    clip.pitch_coarse if hasattr(clip, "pitch_coarse") else None),
+                "pitch_fine": (
+                    clip.pitch_fine if hasattr(clip, "pitch_fine") else None),
             }
         except Exception as e:
             self.log_message("Error getting arrangement clip info: " + str(e))
@@ -1654,7 +1696,16 @@ class AbletonMCP(ControlSurface):
             "track_index": track_index,
             "clip_index": clip_index,
             "name": clip.name,
+            "length": clip.length if hasattr(clip, "length") else None,
+            "color": clip.color if hasattr(clip, "color") else None,
             "sample_name": sample_name,
+            "looping": clip.looping if hasattr(clip, "looping") else None,
+            "loop_start": clip.loop_start if hasattr(clip, "loop_start") else None,
+            "loop_end": clip.loop_end if hasattr(clip, "loop_end") else None,
+            "start_marker": (
+                clip.start_marker if hasattr(clip, "start_marker") else None),
+            "end_marker": (
+                clip.end_marker if hasattr(clip, "end_marker") else None),
             "gain": clip.gain if hasattr(clip, "gain") else None,
             "gain_display_string": (
                 clip.gain_display_string
@@ -2387,6 +2438,20 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error setting song time: " + str(e))
             raise
 
+    def _get_arrangement_loop(self):
+        """Get arrangement loop and punch state."""
+        try:
+            return {
+                "enabled": self._song.loop,
+                "start": self._song.loop_start,
+                "length": self._song.loop_length,
+                "punch_in": self._song.punch_in,
+                "punch_out": self._song.punch_out,
+            }
+        except Exception as e:
+            self.log_message("Error getting arrangement loop: " + str(e))
+            raise
+
     def _set_arrangement_loop(self, enabled, start=None, length=None):
         """Set arrangement loop state and region."""
         try:
@@ -2510,6 +2575,108 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error creating arrangement audio clip: " + str(e))
+            raise
+
+    def _copy_clip_property_if_available(self, source, target, property_name):
+        if hasattr(source, property_name) and hasattr(target, property_name):
+            value = getattr(source, property_name)
+            if value is not None:
+                setattr(target, property_name, value)
+
+    def _ensure_session_clip_slot(self, clip_index, create_missing_scenes):
+        created_scenes = 0
+        while clip_index >= len(self._song.scenes):
+            if not create_missing_scenes:
+                raise IndexError("Clip index out of range")
+            self._song.create_scene(-1)
+            created_scenes += 1
+        return created_scenes
+
+    def _copy_arrangement_audio_clip_to_session(
+        self,
+        source_track_index,
+        arrangement_clip_index,
+        target_track_index,
+        target_clip_index,
+        create_missing_scenes,
+        target_track_name,
+        source_file_path="",
+    ):
+        """Create a Session View audio clip from an Arrangement audio clip."""
+        try:
+            source_track, source_clip = self._resolve_arrangement_clip(
+                source_track_index, arrangement_clip_index)
+            if not source_clip.is_audio_clip:
+                raise ValueError("Arrangement clip is not an audio clip")
+
+            sample_path = ""
+            sample_path_source = "live"
+            if hasattr(source_clip, "sample") and source_clip.sample is not None:
+                sample_path = getattr(source_clip.sample, "file_path", "") or ""
+            if not sample_path and source_file_path:
+                sample_path = source_file_path
+                sample_path_source = "provided"
+            if not sample_path:
+                raise ValueError(
+                    "Arrangement audio clip has no readable sample file path; "
+                    "provide source_file_path to recreate the Session clip")
+
+            created_track = False
+            if target_track_index is None or target_track_index < 0:
+                self._song.create_audio_track(-1)
+                target_track_index = len(self._song.tracks) - 1
+                target_track = self._song.tracks[target_track_index]
+                target_track.name = target_track_name
+                created_track = True
+            else:
+                target_track = self._resolve_session_track(target_track_index)
+                if not target_track.has_audio_input:
+                    raise ValueError("Target track is not an audio track")
+
+            created_scenes = self._ensure_session_clip_slot(
+                target_clip_index, create_missing_scenes)
+
+            if target_clip_index >= len(target_track.clip_slots):
+                raise IndexError("Target clip index out of range")
+
+            target_slot = target_track.clip_slots[target_clip_index]
+            if target_slot.has_clip:
+                raise ValueError("Target Session clip slot already has a clip")
+
+            target_slot.create_audio_clip(sample_path)
+            target_clip = target_slot.clip
+
+            target_clip.name = source_clip.name
+            self._copy_clip_property_if_available(source_clip, target_clip, "color")
+            self._copy_clip_property_if_available(source_clip, target_clip, "muted")
+            self._copy_clip_property_if_available(source_clip, target_clip, "start_marker")
+            self._copy_clip_property_if_available(source_clip, target_clip, "end_marker")
+            self._copy_clip_property_if_available(source_clip, target_clip, "looping")
+            self._copy_clip_property_if_available(source_clip, target_clip, "loop_start")
+            self._copy_clip_property_if_available(source_clip, target_clip, "loop_end")
+            self._copy_clip_property_if_available(source_clip, target_clip, "gain")
+            self._copy_clip_property_if_available(source_clip, target_clip, "pitch_coarse")
+            self._copy_clip_property_if_available(source_clip, target_clip, "pitch_fine")
+            self._copy_clip_property_if_available(source_clip, target_clip, "warping")
+            self._copy_clip_property_if_available(source_clip, target_clip, "warp_mode")
+
+            result = self._serialize_audio_clip(
+                target_clip, target_track_index, target_clip_index)
+            result.update({
+                "source_track_index": source_track_index,
+                "arrangement_clip_index": arrangement_clip_index,
+                "source_track_name": source_track.name,
+                "sample_path": sample_path,
+                "sample_path_source": sample_path_source,
+                "target_track_index": target_track_index,
+                "target_clip_index": target_clip_index,
+                "target_track_name": target_track.name,
+                "created_track": created_track,
+                "created_scenes": created_scenes,
+            })
+            return result
+        except Exception as e:
+            self.log_message("Error copying arrangement audio clip to session: " + str(e))
             raise
 
     def _duplicate_to_arrangement(self, track_index, clip_index, destination_time):

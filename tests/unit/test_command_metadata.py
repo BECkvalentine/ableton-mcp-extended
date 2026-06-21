@@ -90,6 +90,7 @@ def test_existing_local_mutating_commands_are_registered():
         "delete_cue_point",
         "create_arrangement_clip",
         "create_arrangement_audio_clip",
+        "copy_arrangement_audio_clip_to_session",
         "duplicate_to_arrangement",
         "delete_arrangement_clip",
         "set_arrangement_clip_property",

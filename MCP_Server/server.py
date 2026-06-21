@@ -25,6 +25,7 @@ MUTATING_COMMANDS = frozenset({
     "create_audio_track",
     "create_clip",
     "create_cue_point",
+    "copy_arrangement_audio_clip_to_session",
     "create_midi_track",
     "create_return_track",
     "create_scene",
@@ -2503,6 +2504,82 @@ def get_arrangement_info(ctx: Context, track_index: int = 0) -> str:
     except Exception as e:
         logger.error(f"Error getting arrangement info: {str(e)}")
         return f"Error getting arrangement info: {str(e)}"
+
+
+@mcp.tool()
+def get_arrangement_loop(ctx: Context) -> str:
+    """Get arrangement loop and punch state."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_arrangement_loop", {})
+        num, denom = _get_time_signature()
+        start = result.get("start", 0.0)
+        length = result.get("length", 0.0)
+        end = start + length
+        state = "enabled" if result.get("enabled") else "disabled"
+        punch_in = "on" if result.get("punch_in") else "off"
+        punch_out = "on" if result.get("punch_out") else "off"
+        return (
+            f"Loop {state}: bars {beat_to_bar(start, num, denom)}-"
+            f"{beat_to_bar(end, num, denom)} | "
+            f"punch in {punch_in}, punch out {punch_out}"
+        )
+    except Exception as e:
+        logger.error(f"Error getting arrangement loop: {str(e)}")
+        return f"Error getting arrangement loop: {str(e)}"
+
+
+@mcp.tool()
+def copy_arrangement_audio_clip_to_session(
+    ctx: Context,
+    source_track_index: int,
+    arrangement_clip_index: int,
+    target_track_index: int = 0,
+    target_clip_index: int = 1,
+    create_missing_scenes: bool = True,
+    target_track_name: str = "Arrangement Audio Fixture",
+    source_file_path: str = "",
+) -> str:
+    """
+    Copy an Arrangement View audio clip into Session View while preserving clip metadata.
+
+    Parameters:
+    - source_track_index: Arrangement source track number (1-based).
+    - arrangement_clip_index: Arrangement clip number on that track (1-based).
+    - target_track_index: Destination track number (1-based), or 0 to create a new audio track.
+    - target_clip_index: Destination Session clip slot number (1-based).
+    - create_missing_scenes: Create scenes until target_clip_index exists.
+    - target_track_name: Name for a newly-created destination track.
+    - source_file_path: Optional audio file path fallback when Live does not expose
+      the Arrangement clip's sample path.
+    """
+    try:
+        ableton = get_ableton_connection()
+        source_ti = _to_zero_based(source_track_index, "source_track_index")
+        source_ci = _to_zero_based(arrangement_clip_index, "arrangement_clip_index")
+        target_ti = _optional_to_zero_based(target_track_index, "target_track_index")
+        target_ci = _to_zero_based(target_clip_index, "target_clip_index")
+        result = ableton.send_command("copy_arrangement_audio_clip_to_session", {
+            "source_track_index": source_ti,
+            "arrangement_clip_index": source_ci,
+            "target_track_index": target_ti if target_ti is not None else -1,
+            "target_clip_index": target_ci,
+            "create_missing_scenes": create_missing_scenes,
+            "target_track_name": target_track_name,
+            "source_file_path": source_file_path,
+        })
+        target_track = result.get("target_track_index", -1) + 1
+        target_slot = result.get("target_clip_index", -1) + 1
+        created_track = "created " if result.get("created_track") else ""
+        path_source = result.get("sample_path_source", "live")
+        return (
+            f"Copied arrangement audio clip '{result.get('name')}' to "
+            f"{created_track}track {target_track}, slot {target_slot} "
+            f"(source path: {path_source})"
+        )
+    except Exception as e:
+        logger.error(f"Error copying arrangement audio clip to session: {str(e)}")
+        return f"Error copying arrangement audio clip to session: {str(e)}"
 
 
 @mcp.tool()

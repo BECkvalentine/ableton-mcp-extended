@@ -133,6 +133,11 @@ class _ClipSlot:
         target_slot.clip = self.clip.clone()
         target_slot.has_clip = True
 
+    def create_audio_clip(self, file_path):
+        self.clip = _AudioClip("Audio")
+        self.clip.sample.file_path = file_path
+        self.has_clip = True
+
 
 class _Note:
     def __init__(self, pitch=60, start_time=0.0, duration=1.0,
@@ -764,6 +769,11 @@ class TestRoutingAndAudioClipHelpers:
 
         assert info["name"] == "Loop"
         assert info["sample_name"] == "/tmp/audio.wav"
+        assert info["start_marker"] == 0.0
+        assert info["end_marker"] == 4.0
+        assert info["looping"] is True
+        assert info["loop_start"] == 0.0
+        assert info["loop_end"] == 4.0
         assert gain["gain"] == 0.5
         assert pitch["pitch_coarse"] == 2
         assert pitch["pitch_fine"] == 5.0
@@ -798,3 +808,145 @@ class TestRoutingAndAudioClipHelpers:
         assert gain_raised is True
         assert pitch_raised is True
         assert warp_raised is True
+
+
+class TestArrangementReconciliationHelpers:
+    def test_get_arrangement_loop(self):
+        script = _make_script()
+        script._song.loop = True
+        script._song.loop_start = 8.0
+        script._song.loop_length = 16.0
+        script._song.punch_in = True
+        script._song.punch_out = False
+
+        result = script._get_arrangement_loop()
+
+        assert result == {
+            "enabled": True,
+            "start": 8.0,
+            "length": 16.0,
+            "punch_in": True,
+            "punch_out": False,
+        }
+
+    def test_arrangement_clip_info_includes_audio_metadata(self):
+        clip = _AudioClip("CLICK")
+        clip.start_time = 8.0
+        clip.end_time = 16.0
+        clip.muted = False
+        clip.start_marker = 1.0
+        clip.end_marker = 5.0
+        clip.gain = 0.4
+        clip.warping = True
+        clip.warp_mode = 0
+        script = _make_script()
+
+        result = script._get_arrangement_clip_info(clip)
+
+        assert result["sample_path"] == "/tmp/audio.wav"
+        assert result["sample_name"] == ""
+        assert result["start_marker"] == 1.0
+        assert result["end_marker"] == 5.0
+        assert result["gain"] == 0.4
+        assert result["warp_mode_name"] == "Beats"
+
+    def test_copy_arrangement_audio_clip_to_new_session_track(self):
+        source_clip = _AudioClip("CLICK")
+        source_clip.start_time = 8.0
+        source_clip.end_time = 16.0
+        source_clip.muted = False
+        source_clip.color = 0x112233
+        source_clip.start_marker = 1.0
+        source_clip.end_marker = 5.0
+        source_clip.looping = True
+        source_clip.loop_start = 1.0
+        source_clip.loop_end = 5.0
+        source_clip.gain = 0.4
+        source_clip.pitch_coarse = 2
+        source_clip.pitch_fine = 5.0
+        source_clip.warping = True
+        source_clip.warp_mode = 0
+
+        source_track = _NormalTrack(
+            "CLICK",
+            has_midi_input=False,
+            has_audio_input=True,
+            arrangement_clips=[source_clip],
+        )
+        script = _make_script([source_track])
+        script._song.scenes = [_Scene("")]
+
+        def create_audio_track(index):
+            track = _NormalTrack(
+                "Audio",
+                has_midi_input=False,
+                has_audio_input=True,
+            )
+            track.clip_slots = [_ClipSlot()]
+            script._song.tracks.append(track)
+
+        script._song.create_audio_track.side_effect = create_audio_track
+
+        result = script._copy_arrangement_audio_clip_to_session(
+            source_track_index=0,
+            arrangement_clip_index=0,
+            target_track_index=-1,
+            target_clip_index=0,
+            create_missing_scenes=True,
+            target_track_name="Fixture",
+        )
+
+        target_track = script._song.tracks[1]
+        target_clip = target_track.clip_slots[0].clip
+        assert result["created_track"] is True
+        assert result["target_track_name"] == "Fixture"
+        assert result["sample_path_source"] == "live"
+        assert target_clip.name == "CLICK"
+        assert target_clip.sample.file_path == "/tmp/audio.wav"
+        assert target_clip.start_marker == 1.0
+        assert target_clip.end_marker == 5.0
+        assert target_clip.gain == 0.4
+        assert target_clip.pitch_coarse == 2
+        assert target_clip.warping is True
+
+    def test_copy_arrangement_audio_clip_uses_source_file_path_fallback(self):
+        source_clip = _AudioClip("CLICK")
+        source_clip.sample.file_path = ""
+        source_clip.start_marker = 2.0
+        source_clip.end_marker = 6.0
+        source_track = _NormalTrack(
+            "CLICK",
+            has_midi_input=False,
+            has_audio_input=True,
+            arrangement_clips=[source_clip],
+        )
+        script = _make_script([source_track])
+        script._song.scenes = [_Scene("")]
+
+        def create_audio_track(index):
+            track = _NormalTrack(
+                "Audio",
+                has_midi_input=False,
+                has_audio_input=True,
+            )
+            track.clip_slots = [_ClipSlot()]
+            script._song.tracks.append(track)
+
+        script._song.create_audio_track.side_effect = create_audio_track
+
+        result = script._copy_arrangement_audio_clip_to_session(
+            source_track_index=0,
+            arrangement_clip_index=0,
+            target_track_index=-1,
+            target_clip_index=0,
+            create_missing_scenes=True,
+            target_track_name="Fixture",
+            source_file_path="/tmp/provided-click.wav",
+        )
+
+        target_clip = script._song.tracks[1].clip_slots[0].clip
+        assert result["sample_path"] == "/tmp/provided-click.wav"
+        assert result["sample_path_source"] == "provided"
+        assert target_clip.sample.file_path == "/tmp/provided-click.wav"
+        assert target_clip.start_marker == 2.0
+        assert target_clip.end_marker == 6.0

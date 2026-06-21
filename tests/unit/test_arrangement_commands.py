@@ -190,8 +190,10 @@ class TestCreateCuePointCommand:
         from MCP_Server.server import create_cue_point
         create_cue_point(MagicMock(), bar=5, name="Bridge")
 
-        mock_ableton.send_command.assert_called_with(
-            "create_cue_point", {"time": 16.0, "name": "Bridge"})
+        mock_ableton.send_command.assert_has_calls([
+            call("set_song_time", {"time": 16.0}),
+            call("create_cue_point", {"time": 16.0, "name": "Bridge"}),
+        ])
 
     @patch('MCP_Server.server._get_time_signature', return_value=(4, 4))
     @patch('MCP_Server.server.get_ableton_connection')
@@ -204,8 +206,10 @@ class TestCreateCuePointCommand:
         from MCP_Server.server import delete_cue_point
         delete_cue_point(MagicMock(), bar=5)
 
-        mock_ableton.send_command.assert_called_with(
-            "delete_cue_point", {"time": 16.0})
+        mock_ableton.send_command.assert_has_calls([
+            call("set_song_time", {"time": 16.0}),
+            call("delete_cue_point", {"time": 16.0}),
+        ])
 
 
 class TestCreateArrangementMidiClipCommand:

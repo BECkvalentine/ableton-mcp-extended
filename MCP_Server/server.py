@@ -505,6 +505,23 @@ def create_midi_track(ctx: Context, index: int = -1) -> str:
 
 
 @mcp.tool()
+def create_audio_track(ctx: Context, index: int = -1) -> str:
+    """
+    Create a new audio track in the Ableton session.
+
+    Parameters:
+    - index: The index to insert the track at (-1 = end of list)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_audio_track", {"index": index})
+        return f"Created new audio track: {result.get('name', 'unknown')}"
+    except Exception as e:
+        logger.error(f"Error creating audio track: {str(e)}")
+        return f"Error creating audio track: {str(e)}"
+
+
+@mcp.tool()
 def set_track_name(ctx: Context, track_index: int, name: str) -> str:
     """
     Set the name of a track.
@@ -2708,6 +2725,7 @@ def create_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0, name: str = 
     try:
         ableton = get_ableton_connection()
         time_val = _convert_bar_to_beat(bar, beat)
+        ableton.send_command("set_song_time", {"time": time_val})
         result = ableton.send_command("create_cue_point", {"time": time_val, "name": name})
         return f"Created cue point '{name}' at bar {bar if bar > 0 else '?'}"
     except Exception as e:
@@ -2726,6 +2744,7 @@ def delete_cue_point(ctx: Context, bar: int = 0, beat: float = 0.0) -> str:
     try:
         ableton = get_ableton_connection()
         time_val = _convert_bar_to_beat(bar, beat)
+        ableton.send_command("set_song_time", {"time": time_val})
         ableton.send_command("delete_cue_point", {"time": time_val})
         return f"Deleted cue point at bar {bar if bar > 0 else '?'}"
     except Exception as e:

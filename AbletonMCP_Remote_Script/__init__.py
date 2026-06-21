@@ -10,6 +10,7 @@ import socket
 import json
 import threading
 import time
+import time as time_module
 import traceback
 
 # Change queue import for Python 2
@@ -258,7 +259,7 @@ class AbletonMCP(ControlSurface):
                 clip_index = params.get("clip_index", 0)
                 response["result"] = self._get_audio_clip_info(track_index, clip_index)
             # Commands that modify Live's state should be scheduled on the main thread
-            elif command_type in ["create_midi_track", "set_track_name",
+            elif command_type in ["create_midi_track", "create_audio_track", "set_track_name",
                                  "create_clip", "add_notes_to_clip", "set_clip_name",
                                  "remove_notes_from_clip", "apply_note_modifications",
                                  "set_clip_loop", "set_clip_color",
@@ -307,6 +308,9 @@ class AbletonMCP(ControlSurface):
                         if command_type == "create_midi_track":
                             index = params.get("index", -1)
                             result = self._create_midi_track(index)
+                        elif command_type == "create_audio_track":
+                            index = params.get("index", -1)
+                            result = self._create_audio_track(index)
                         elif command_type == "set_track_name":
                             track_index = params.get("track_index", 0)
                             name = params.get("name", "")
@@ -948,6 +952,23 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error creating MIDI track: " + str(e))
+            raise
+
+    def _create_audio_track(self, index):
+        """Create a new audio track at the specified index"""
+        try:
+            self._song.create_audio_track(index)
+
+            new_track_index = len(self._song.tracks) - 1 if index == -1 else index
+            new_track = self._song.tracks[new_track_index]
+
+            result = {
+                "index": new_track_index,
+                "name": new_track.name
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error creating audio track: " + str(e))
             raise
     
     
@@ -2496,13 +2517,36 @@ class AbletonMCP(ControlSurface):
             for cp in tuple(self._song.cue_points):
                 if abs(cp.time - time) < 0.01:
                     raise ValueError("Cue point already exists at this position: " + cp.name)
-            self._song.current_song_time = time
+            before = tuple(self._song.cue_points)
+            before_ids = [id(cp) for cp in before]
+            self._move_arrangement_position(time)
             self._song.set_or_delete_cue()
+            created = [
+                cp for cp in tuple(self._song.cue_points)
+                if id(cp) not in before_ids and abs(cp.time - time) < 0.01
+            ]
+            if not created:
+                unexpected = [
+                    cp for cp in tuple(self._song.cue_points)
+                    if id(cp) not in before_ids
+                ]
+                unexpected_times = []
+                for cp in unexpected:
+                    try:
+                        unexpected_times.append(str(cp.time))
+                    except Exception:
+                        unexpected_times.append("(unreadable)")
+                self._undo_song_change()
+                if unexpected:
+                    raise ValueError(
+                        "Cue point was created at the wrong position: {0}".format(
+                            ", ".join(unexpected_times)))
+                raise ValueError("Cue point was not created")
             if name:
-                for cp in tuple(self._song.cue_points):
-                    if abs(cp.time - time) < 0.01:
-                        cp.name = name
-                        break
+                try:
+                    created[0].name = name
+                except Exception as e:
+                    self.log_message("Could not name cue point: " + str(e))
             return {"time": time, "name": name}
         except Exception as e:
             self.log_message("Error creating cue point: " + str(e))
@@ -2518,12 +2562,34 @@ class AbletonMCP(ControlSurface):
                     break
             if not found:
                 raise ValueError("No cue point at this position")
-            self._song.current_song_time = time
+            before = tuple(self._song.cue_points)
+            self._move_arrangement_position(time)
             self._song.set_or_delete_cue()
+            if any(abs(cp.time - time) < 0.01 for cp in tuple(self._song.cue_points)):
+                self._undo_song_change()
+                raise ValueError("Cue point was not deleted at requested position")
+            if len(tuple(self._song.cue_points)) >= len(before):
+                self._undo_song_change()
+                raise ValueError("Cue point delete toggled the wrong position")
             return {"deleted": True}
         except Exception as e:
             self.log_message("Error deleting cue point: " + str(e))
             raise
+
+    def _undo_song_change(self):
+        """Best-effort rollback for partially-applied edits."""
+        try:
+            can_undo = getattr(self._song, "can_undo", True)
+            if can_undo:
+                self._song.undo()
+        except Exception as e:
+            self.log_message("Error rolling back edit: " + str(e))
+
+    def _move_arrangement_position(self, time):
+        """Move Live's arrangement insert/playback position to an absolute beat."""
+        self._song.current_song_time = time
+        self._song.start_time = time
+        time_module.sleep(0.1)
 
     def _validate_not_return_or_master(self, track_index):
         """Raise if track is a return or master track."""

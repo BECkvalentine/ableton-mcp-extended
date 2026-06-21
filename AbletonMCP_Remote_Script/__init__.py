@@ -247,12 +247,25 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 clip_index = params.get("clip_index", 0)
                 response["result"] = self._get_notes_from_clip(track_index, clip_index)
+            elif command_type == "get_track_routing":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_track_routing(track_index)
+            elif command_type == "get_available_routings":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_available_routings(track_index)
+            elif command_type == "get_audio_clip_info":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_audio_clip_info(track_index, clip_index)
             # Commands that modify Live's state should be scheduled on the main thread
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "add_notes_to_clip", "set_clip_name",
                                  "remove_notes_from_clip", "apply_note_modifications",
                                  "set_clip_loop", "set_clip_color",
                                  "duplicate_clip", "quantize_clip",
+                                 "set_input_routing", "set_output_routing",
+                                 "set_audio_clip_gain", "set_audio_clip_pitch",
+                                 "set_audio_clip_warp",
                                  "create_scene", "delete_scene", "duplicate_scene",
                                  "fire_scene", "set_scene_name", "set_scene_color",
                                  "set_scene_tempo", "stop_all_clips",
@@ -354,6 +367,39 @@ class AbletonMCP(ControlSurface):
                                 clip_index,
                                 params.get("quantize_to", 0.25),
                                 params.get("amount", 1.0))
+                        elif command_type == "set_input_routing":
+                            track_index = params.get("track_index", 0)
+                            result = self._set_input_routing(
+                                track_index,
+                                params.get("routing_type_name", ""))
+                        elif command_type == "set_output_routing":
+                            track_index = params.get("track_index", 0)
+                            result = self._set_output_routing(
+                                track_index,
+                                params.get("routing_type_name", ""))
+                        elif command_type == "set_audio_clip_gain":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._set_audio_clip_gain(
+                                track_index,
+                                clip_index,
+                                params.get("gain", None))
+                        elif command_type == "set_audio_clip_pitch":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._set_audio_clip_pitch(
+                                track_index,
+                                clip_index,
+                                params.get("pitch_coarse", None),
+                                params.get("pitch_fine", None))
+                        elif command_type == "set_audio_clip_warp":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._set_audio_clip_warp(
+                                track_index,
+                                clip_index,
+                                params.get("warping", None),
+                                params.get("warp_mode", None))
                         elif command_type == "set_scene_name":
                             scene_index = params.get("scene_index", 0)
                             name = params.get("name", "")
@@ -1501,6 +1547,194 @@ class AbletonMCP(ControlSurface):
             }
         except Exception as e:
             self.log_message("Error quantizing clip: " + str(e))
+            raise
+
+    WARP_MODES = {
+        0: "Beats",
+        1: "Tones",
+        2: "Texture",
+        3: "Re-Pitch",
+        4: "Complex",
+        6: "Complex Pro",
+    }
+    WARP_MODE_NAMES = {v: k for k, v in WARP_MODES.items()}
+
+    def _get_track_routing(self, track_index):
+        """Get current input and output routing for a session track."""
+        try:
+            track = self._resolve_session_track(track_index)
+            return {
+                "track_index": track_index,
+                "input_routing_type": track.input_routing_type.display_name,
+                "input_routing_channel": track.input_routing_channel.display_name,
+                "output_routing_type": track.output_routing_type.display_name,
+                "output_routing_channel": track.output_routing_channel.display_name,
+            }
+        except Exception as e:
+            self.log_message("Error getting track routing: " + str(e))
+            raise
+
+    def _get_available_routings(self, track_index):
+        """Get available input and output routing types for a session track."""
+        try:
+            track = self._resolve_session_track(track_index)
+            return {
+                "track_index": track_index,
+                "available_input_routing_types": [
+                    routing.display_name
+                    for routing in track.available_input_routing_types
+                ],
+                "available_output_routing_types": [
+                    routing.display_name
+                    for routing in track.available_output_routing_types
+                ],
+            }
+        except Exception as e:
+            self.log_message("Error getting available routings: " + str(e))
+            raise
+
+    def _set_input_routing(self, track_index, routing_type_name):
+        """Set input routing type by display name."""
+        try:
+            track = self._resolve_session_track(track_index)
+            for routing_type in track.available_input_routing_types:
+                if routing_type.display_name == routing_type_name:
+                    track.input_routing_type = routing_type
+                    return {
+                        "track_index": track_index,
+                        "input_routing_type": routing_type_name,
+                    }
+            available = [
+                routing.display_name for routing in track.available_input_routing_types
+            ]
+            raise Exception(
+                "Input routing type not found: '{0}'. Available: {1}".format(
+                    routing_type_name, available))
+        except Exception as e:
+            self.log_message("Error setting input routing: " + str(e))
+            raise
+
+    def _set_output_routing(self, track_index, routing_type_name):
+        """Set output routing type by display name."""
+        try:
+            track = self._resolve_session_track(track_index)
+            for routing_type in track.available_output_routing_types:
+                if routing_type.display_name == routing_type_name:
+                    track.output_routing_type = routing_type
+                    return {
+                        "track_index": track_index,
+                        "output_routing_type": routing_type_name,
+                    }
+            available = [
+                routing.display_name for routing in track.available_output_routing_types
+            ]
+            raise Exception(
+                "Output routing type not found: '{0}'. Available: {1}".format(
+                    routing_type_name, available))
+        except Exception as e:
+            self.log_message("Error setting output routing: " + str(e))
+            raise
+
+    def _get_audio_clip(self, track_index, clip_index):
+        clip = self._get_clip(track_index, clip_index)
+        if not clip.is_audio_clip:
+            raise Exception("Clip is not an audio clip")
+        return clip
+
+    def _serialize_audio_clip(self, clip, track_index, clip_index):
+        sample_name = ""
+        try:
+            if hasattr(clip, "sample") and clip.sample is not None:
+                sample_name = getattr(clip.sample, "file_path", "") or ""
+        except Exception as e:
+            self.log_message("Could not get sample file path: " + str(e))
+
+        warp_mode = int(clip.warp_mode) if hasattr(clip, "warp_mode") else 0
+        return {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "name": clip.name,
+            "sample_name": sample_name,
+            "gain": clip.gain if hasattr(clip, "gain") else None,
+            "gain_display_string": (
+                clip.gain_display_string
+                if hasattr(clip, "gain_display_string") else ""),
+            "warping": clip.warping if hasattr(clip, "warping") else None,
+            "warp_mode": warp_mode,
+            "warp_mode_name": self.WARP_MODES.get(warp_mode, "Unknown"),
+            "pitch_coarse": (
+                clip.pitch_coarse if hasattr(clip, "pitch_coarse") else 0),
+            "pitch_fine": (
+                clip.pitch_fine if hasattr(clip, "pitch_fine") else 0.0),
+        }
+
+    def _get_audio_clip_info(self, track_index, clip_index):
+        """Read audio-specific properties of a Session View audio clip."""
+        try:
+            clip = self._get_audio_clip(track_index, clip_index)
+            return self._serialize_audio_clip(clip, track_index, clip_index)
+        except Exception as e:
+            self.log_message("Error getting audio clip info: " + str(e))
+            raise
+
+    def _set_audio_clip_gain(self, track_index, clip_index, gain):
+        """Set the gain of an audio clip."""
+        try:
+            if gain is None:
+                raise ValueError("gain is required")
+            gain = float(gain)
+            if gain < 0.0 or gain > 1.0:
+                raise ValueError("gain must be between 0.0 and 1.0")
+            clip = self._get_audio_clip(track_index, clip_index)
+            clip.gain = gain
+            return self._serialize_audio_clip(clip, track_index, clip_index)
+        except Exception as e:
+            self.log_message("Error setting audio clip gain: " + str(e))
+            raise
+
+    def _set_audio_clip_pitch(self, track_index, clip_index,
+                              pitch_coarse, pitch_fine):
+        """Set audio clip pitch coarse/fine values."""
+        try:
+            clip = self._get_audio_clip(track_index, clip_index)
+            if pitch_coarse is not None:
+                coarse = int(pitch_coarse)
+                if coarse < -48 or coarse > 48:
+                    raise ValueError("pitch_coarse must be between -48 and 48")
+                clip.pitch_coarse = coarse
+            if pitch_fine is not None:
+                fine = float(pitch_fine)
+                if fine < -50.0 or fine > 50.0:
+                    raise ValueError("pitch_fine must be between -50.0 and 50.0")
+                clip.pitch_fine = fine
+            return self._serialize_audio_clip(clip, track_index, clip_index)
+        except Exception as e:
+            self.log_message("Error setting audio clip pitch: " + str(e))
+            raise
+
+    def _set_audio_clip_warp(self, track_index, clip_index, warping, warp_mode):
+        """Set audio clip warp state and/or mode."""
+        try:
+            clip = self._get_audio_clip(track_index, clip_index)
+            if warping is not None:
+                clip.warping = bool(warping)
+            if warp_mode is not None:
+                if isinstance(warp_mode, str):
+                    mode_int = self.WARP_MODE_NAMES.get(warp_mode)
+                    if mode_int is None:
+                        raise ValueError(
+                            "Unknown warp mode: {0}. Valid: {1}".format(
+                                warp_mode, list(self.WARP_MODE_NAMES.keys())))
+                else:
+                    mode_int = int(warp_mode)
+                    if mode_int not in self.WARP_MODES:
+                        raise ValueError(
+                            "Unknown warp mode int: {0}. Valid: {1}".format(
+                                mode_int, list(self.WARP_MODES.keys())))
+                clip.warp_mode = mode_int
+            return self._serialize_audio_clip(clip, track_index, clip_index)
+        except Exception as e:
+            self.log_message("Error setting audio clip warp: " + str(e))
             raise
 
     def _resolve_scene(self, scene_index):

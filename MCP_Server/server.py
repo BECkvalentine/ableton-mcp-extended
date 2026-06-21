@@ -54,6 +54,11 @@ MUTATING_COMMANDS = frozenset({
     "set_clip_name",
     "set_clip_color",
     "set_clip_loop",
+    "set_audio_clip_gain",
+    "set_audio_clip_pitch",
+    "set_audio_clip_warp",
+    "set_input_routing",
+    "set_output_routing",
     "set_current_song_time",
     "set_master_panning",
     "set_master_volume",
@@ -1289,6 +1294,219 @@ def quantize_clip(ctx: Context, track_index: int, clip_index: int,
     except Exception as e:
         logger.error(f"Error quantizing clip: {str(e)}")
         return f"Error quantizing clip: {str(e)}"
+
+
+@mcp.tool()
+def get_track_routing(ctx: Context, track_index: int) -> str:
+    """
+    Get current input and output routing for a session track.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("get_track_routing", {"track_index": ti})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting track routing: {str(e)}")
+        return f"Error getting track routing: {str(e)}"
+
+
+@mcp.tool()
+def get_available_routings(ctx: Context, track_index: int) -> str:
+    """
+    Get available input and output routing types for a session track.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("get_available_routings", {"track_index": ti})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting available routings: {str(e)}")
+        return f"Error getting available routings: {str(e)}"
+
+
+@mcp.tool()
+def set_input_routing(ctx: Context, track_index: int,
+                      routing_type_name: str) -> str:
+    """
+    Set a session track input routing type by display name.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - routing_type_name: Display name from get_available_routings.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("set_input_routing", {
+            "track_index": ti,
+            "routing_type_name": routing_type_name,
+        })
+        return (
+            f"Input routing set to '{result.get('input_routing_type')}' "
+            f"on track {track_index}"
+        )
+    except Exception as e:
+        logger.error(f"Error setting input routing: {str(e)}")
+        return f"Error setting input routing: {str(e)}"
+
+
+@mcp.tool()
+def set_output_routing(ctx: Context, track_index: int,
+                       routing_type_name: str) -> str:
+    """
+    Set a session track output routing type by display name.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - routing_type_name: Display name from get_available_routings.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        result = ableton.send_command("set_output_routing", {
+            "track_index": ti,
+            "routing_type_name": routing_type_name,
+        })
+        return (
+            f"Output routing set to '{result.get('output_routing_type')}' "
+            f"on track {track_index}"
+        )
+    except Exception as e:
+        logger.error(f"Error setting output routing: {str(e)}")
+        return f"Error setting output routing: {str(e)}"
+
+
+@mcp.tool()
+def get_audio_clip_info(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Get audio-specific properties for a Session View audio clip.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("get_audio_clip_info", {
+            "track_index": ti,
+            "clip_index": ci,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting audio clip info: {str(e)}")
+        return f"Error getting audio clip info: {str(e)}"
+
+
+@mcp.tool()
+def set_audio_clip_gain(ctx: Context, track_index: int, clip_index: int,
+                        gain: float) -> str:
+    """
+    Set gain for a Session View audio clip.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - gain: Linear gain from 0.0 to 1.0.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("set_audio_clip_gain", {
+            "track_index": ti,
+            "clip_index": ci,
+            "gain": gain,
+        })
+        return (
+            f"Audio clip gain set to {result.get('gain')} "
+            f"({result.get('gain_display_string', '')})"
+        )
+    except Exception as e:
+        logger.error(f"Error setting audio clip gain: {str(e)}")
+        return f"Error setting audio clip gain: {str(e)}"
+
+
+@mcp.tool()
+def set_audio_clip_pitch(
+    ctx: Context,
+    track_index: int,
+    clip_index: int,
+    pitch_coarse: Optional[int] = None,
+    pitch_fine: Optional[float] = None,
+) -> str:
+    """
+    Set pitch for a Session View audio clip.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - pitch_coarse: Semitone shift (-48 to 48). Omit to leave unchanged.
+    - pitch_fine: Cent shift (-50.0 to 50.0). Omit to leave unchanged.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("set_audio_clip_pitch", {
+            "track_index": ti,
+            "clip_index": ci,
+            "pitch_coarse": pitch_coarse,
+            "pitch_fine": pitch_fine,
+        })
+        return (
+            f"Audio clip pitch set to coarse={result.get('pitch_coarse')} "
+            f"fine={result.get('pitch_fine')}"
+        )
+    except Exception as e:
+        logger.error(f"Error setting audio clip pitch: {str(e)}")
+        return f"Error setting audio clip pitch: {str(e)}"
+
+
+@mcp.tool()
+def set_audio_clip_warp(
+    ctx: Context,
+    track_index: int,
+    clip_index: int,
+    warping: Optional[bool] = None,
+    warp_mode: Optional[Union[str, int]] = None,
+) -> str:
+    """
+    Set warp state and/or warp mode for a Session View audio clip.
+
+    Parameters:
+    - track_index: Track number (1-based).
+    - clip_index: Clip slot number (1-based).
+    - warping: True to enable warping, False to disable.
+    - warp_mode: One of Beats, Tones, Texture, Re-Pitch, Complex, Complex Pro,
+      or the matching Live warp mode integer.
+    """
+    try:
+        ableton = get_ableton_connection()
+        ti = _to_zero_based(track_index, "track_index")
+        ci = _to_zero_based(clip_index, "clip_index")
+        result = ableton.send_command("set_audio_clip_warp", {
+            "track_index": ti,
+            "clip_index": ci,
+            "warping": warping,
+            "warp_mode": warp_mode,
+        })
+        return (
+            f"Audio clip warp set to warping={result.get('warping')} "
+            f"mode={result.get('warp_mode_name')}"
+        )
+    except Exception as e:
+        logger.error(f"Error setting audio clip warp: {str(e)}")
+        return f"Error setting audio clip warp: {str(e)}"
 
 
 @mcp.tool()

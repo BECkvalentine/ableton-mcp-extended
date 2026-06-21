@@ -52,6 +52,18 @@ class _NormalTrack:
         send = MagicMock()
         send.value = 0.0
         self.mixer_device.sends = [send]
+        self.input_routing_type = _Route("No Input")
+        self.input_routing_channel = _Route("All Channels")
+        self.output_routing_type = _Route("Master")
+        self.output_routing_channel = _Route("Track Out")
+        self.available_input_routing_types = [
+            self.input_routing_type,
+            _Route("Ext. In"),
+        ]
+        self.available_output_routing_types = [
+            self.output_routing_type,
+            _Route("Sends Only"),
+        ]
 
 
 class _ReturnTrack:
@@ -103,6 +115,11 @@ class _Scene:
         self.color = color
         self.tempo = tempo
         self.fire = MagicMock()
+
+
+class _Route:
+    def __init__(self, display_name):
+        self.display_name = display_name
 
 
 class _ClipSlot:
@@ -164,6 +181,31 @@ class _MidiClip:
 
     def quantize(self, quantize_to, amount):
         self.quantize_calls.append((quantize_to, amount))
+
+
+class _AudioClip:
+    is_audio_clip = True
+    is_midi_clip = False
+    is_playing = False
+    is_recording = False
+
+    def __init__(self, name="Audio", length=4.0):
+        self.name = name
+        self.length = length
+        self.color = 0
+        self.looping = True
+        self.loop_start = 0.0
+        self.loop_end = length
+        self.start_marker = 0.0
+        self.end_marker = length
+        self.sample = MagicMock()
+        self.sample.file_path = "/tmp/audio.wav"
+        self.gain = 1.0
+        self.gain_display_string = "0.00 dB"
+        self.warping = False
+        self.warp_mode = 0
+        self.pitch_coarse = 0
+        self.pitch_fine = 0.0
 
 
 def _make_script(tracks=()):
@@ -690,3 +732,69 @@ class TestSessionClipHelpers:
             "quantize_to": 0.25,
             "amount": 0.75,
         }
+
+
+class TestRoutingAndAudioClipHelpers:
+    def test_track_routing_read_and_write(self):
+        track = _NormalTrack("Keys")
+        script = _make_script([track])
+
+        routing = script._get_track_routing(0)
+        available = script._get_available_routings(0)
+        input_result = script._set_input_routing(0, "Ext. In")
+        output_result = script._set_output_routing(0, "Sends Only")
+
+        assert routing["input_routing_type"] == "No Input"
+        assert available["available_input_routing_types"] == ["No Input", "Ext. In"]
+        assert input_result == {"track_index": 0, "input_routing_type": "Ext. In"}
+        assert output_result == {"track_index": 0, "output_routing_type": "Sends Only"}
+        assert track.input_routing_type.display_name == "Ext. In"
+        assert track.output_routing_type.display_name == "Sends Only"
+
+    def test_audio_clip_info_and_setters(self):
+        clip = _AudioClip("Loop")
+        track = _NormalTrack("Audio", has_midi_input=False, has_audio_input=True)
+        track.clip_slots = [_ClipSlot(clip)]
+        script = _make_script([track])
+
+        info = script._get_audio_clip_info(0, 0)
+        gain = script._set_audio_clip_gain(0, 0, 0.5)
+        pitch = script._set_audio_clip_pitch(0, 0, 2, 5.0)
+        warp = script._set_audio_clip_warp(0, 0, True, "Beats")
+
+        assert info["name"] == "Loop"
+        assert info["sample_name"] == "/tmp/audio.wav"
+        assert gain["gain"] == 0.5
+        assert pitch["pitch_coarse"] == 2
+        assert pitch["pitch_fine"] == 5.0
+        assert warp["warping"] is True
+        assert warp["warp_mode"] == 0
+        assert warp["warp_mode_name"] == "Beats"
+
+    def test_audio_clip_setters_validate_ranges(self):
+        clip = _AudioClip("Loop")
+        track = _NormalTrack("Audio", has_midi_input=False, has_audio_input=True)
+        track.clip_slots = [_ClipSlot(clip)]
+        script = _make_script([track])
+
+        try:
+            script._set_audio_clip_gain(0, 0, 1.5)
+            gain_raised = False
+        except ValueError:
+            gain_raised = True
+
+        try:
+            script._set_audio_clip_pitch(0, 0, 99, None)
+            pitch_raised = False
+        except ValueError:
+            pitch_raised = True
+
+        try:
+            script._set_audio_clip_warp(0, 0, True, "Unknown")
+            warp_raised = False
+        except ValueError:
+            warp_raised = True
+
+        assert gain_raised is True
+        assert pitch_raised is True
+        assert warp_raised is True
